@@ -1,0 +1,67 @@
+================================================================================
+FEATURE ENGINEERING REPORT
+Generated: 2026-02-23 19:51:33
+================================================================================
+
+Original features:  46
+Final features:     24
+Total removed:      22
+
+STEP 1 — Near-Zero Variance Removed:
+--------------------------------------------------
+  Bwd_PSH_Flags  (var=0.00e+00)
+  Bwd_URG_Flags  (var=0.00e+00)
+  Fwd_Avg_Bytes_per_Bulk  (var=0.00e+00)
+  Fwd_Avg_Packets_per_Bulk  (var=0.00e+00)
+  Fwd_Avg_Bulk_Rate  (var=0.00e+00)
+  Bwd_Avg_Bytes_per_Bulk  (var=0.00e+00)
+  Bwd_Avg_Packets_per_Bulk  (var=0.00e+00)
+  Bwd_Avg_Bulk_Rate  (var=0.00e+00)
+
+STEP 2 — Exact Duplicates Removed:
+--------------------------------------------------
+  SYN_Flag_Count  (duplicate of Fwd_PSH_Flags)
+  CWE_Flag_Count  (duplicate of Fwd_URG_Flags)
+
+STEP 3 — Correlation Pruning Removed:
+--------------------------------------------------
+  Dropped                                       Kept                                          |corr|
+  min_seg_size_forward                          Fwd_Header_Length                             1.0000
+  RST_Flag_Count                                ECE_Flag_Count                                1.0000
+  Total_Backward_Packets                        Bwd_Header_Length                             0.9997
+  Total_Fwd_Packets                             Total_Backward_Packets                        0.9996
+  act_data_pkt_fwd                              Total_Fwd_Packets                             0.9994
+  Total_Fwd_Packets                             Bwd_Header_Length                             0.9993
+  Idle_Mean                                     Idle_Max                                      0.9907
+  Idle_Min                                      Idle_Mean                                     0.9905
+  Packet_Length_Mean                            Bwd_Packet_Length_Mean                        0.9228
+  Bwd_Packet_Length_Mean                        Max_Packet_Length                             0.9082
+  Active_Min                                    Active_Mean                                   0.9001
+  Flow_IAT_Mean                                 Fwd_IAT_Mean                                  0.8974
+
+FINAL SELECTED FEATURES:
+--------------------------------------------------
+   1. Flow_Duration
+   2. Fwd_Packet_Length_Mean
+   3. Flow_Bytes_per_s
+   4. Fwd_IAT_Mean
+   5. Bwd_IAT_Mean
+   6. Fwd_PSH_Flags
+   7. Fwd_URG_Flags
+   8. Fwd_Header_Length
+   9. Bwd_Header_Length
+  10. Min_Packet_Length
+  11. Max_Packet_Length
+  12. FIN_Flag_Count
+  13. PSH_Flag_Count
+  14. ACK_Flag_Count
+  15. URG_Flag_Count
+  16. ECE_Flag_Count
+  17. Down_per_Up_Ratio
+  18. Init_Win_bytes_forward
+  19. Init_Win_bytes_backward
+  20. Active_Mean
+  21. Active_Std
+  22. Active_Max
+  23. Idle_Std
+  24. Idle_Max

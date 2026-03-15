@@ -1,3 +1,1 @@
-# core/__init__.py
-from .tensor import Tensor
-from . import dtypes, ops
+# core/__init__.py — lazy, no eager imports

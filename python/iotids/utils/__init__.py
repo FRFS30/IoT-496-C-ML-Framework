@@ -1,2 +1,1 @@
-# utils/__init__.py
-from . import math, random, io
+# utils/__init__.py — lazy, no eager imports
