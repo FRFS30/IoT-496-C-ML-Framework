@@ -46,11 +46,11 @@ Usage
 -----
     from iotids.boosting.serializer import save_xgb, load_xgb
 
-    save_xgb(model, "checkpoints/xgb_round_5.iotids")
-    model = load_xgb("checkpoints/xgb_round_5.iotids")
+    save_xgb(model, "checkpoints/xgb_round_5.bin")
+    model = load_xgb("checkpoints/xgb_round_5.bin")
 
     # Convenience: load leaf values only (fast, no full model rebuild)
-    weights = load_weights("checkpoints/xgb_round_5.iotids")
+    weights = load_weights("checkpoints/xgb_round_5.bin")
 """
 
 from __future__ import annotations

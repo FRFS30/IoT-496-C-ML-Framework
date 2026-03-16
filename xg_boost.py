@@ -126,7 +126,7 @@ class Config:
 
     # ── Output ───────────────────────────────────────────────────────────────
     SAVE_MODEL          = True
-    MODEL_OUT           = "models/xgb_baseline.iotids"
+    MODEL_OUT           = "models/xgb_baseline.bin"
     RESULTS_OUT         = "results/xgb_results.txt"
 
     # ── Columns to exclude from feature matrix ───────────────────────────────
