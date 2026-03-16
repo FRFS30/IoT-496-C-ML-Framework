@@ -392,7 +392,8 @@ def save_artifacts(model, scaler, config: Config):
     scaler_path = config.MODEL_DIR / "iotids_rf_scaler.bin"
 
     save_rf(model, str(model_path))
-    save(scaler, str(scaler_path))
+    save(scaler.get_params(), str(scaler_path))
+
 
     print(f"\n  Model  saved: {model_path}")
     print(f"  Scaler saved: {scaler_path}")
