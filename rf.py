@@ -16,6 +16,7 @@ Usage:
 import argparse
 import json
 import math
+import pickle
 import time
 from pathlib import Path
 
@@ -349,11 +350,13 @@ def save_artifacts(model, scaler, config: Config, suffix: str = ""):
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    model_path  = config.MODEL_DIR / f"iotids_rf_model{suffix}.bin"
-    scaler_path = config.MODEL_DIR / f"iotids_rf_scaler{suffix}.bin"
+    model_path  = config.MODEL_DIR / f"iotids_rf_model{suffix}.pkl"
+    scaler_path = config.MODEL_DIR / f"iotids_rf_scaler{suffix}.pkl"
 
-    save_rf(model, str(model_path))
-    save(scaler.get_params(), str(scaler_path))
+    with open(model_path, "wb") as f:
+        pickle.dump(model, f)
+    with open(scaler_path, "wb") as f:
+        pickle.dump(scaler, f)
 
     print(f"\n  Model  saved: {model_path}")
     print(f"  Scaler saved: {scaler_path}")
@@ -459,9 +462,9 @@ def main():
         val_metrics_runs.append(m_val)
         test_metrics_runs.append(m_test)
 
-        # ── Save model from last repeat ───────────────────────────────────
-        if repeat == config.REPEATS - 1:
-            save_artifacts(model, splits["scaler"], config)
+        # ── Save model for this repeat ────────────────────────────────────
+        suffix = f"_repeat{repeat+1}" if config.REPEATS > 1 else ""
+        save_artifacts(model, splits["scaler"], config, suffix=suffix)
 
         # ── Per-repeat JSON record ────────────────────────────────────────
         all_runs.append({
