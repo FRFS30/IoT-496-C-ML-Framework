@@ -92,25 +92,24 @@ class Sequential:
         n_val = max(1, int(n * validation_split))
         X_val, y_val = X[-n_val:], y[-n_val:]
         X_tr,  y_tr  = X[:-n_val], y[:-n_val]
+        n_tr = len(y_tr)
 
         history = {"loss": [], "val_loss": [], "val_acc": []}
 
         for epoch in range(epochs):
             self._set_training(True)
 
-            # Shuffle training data
-            indices = list(range(len(y_tr)))
+            # Shuffle via index only — avoids rebuilding the full 2.4M list
+            indices = list(range(n_tr))
             _fisher_yates(indices)
-            X_tr = [X_tr[i] for i in indices]
-            y_tr = [y_tr[i] for i in indices]
 
             epoch_loss = 0.0
-            n_batches = 0
+            n_batches  = 0
 
-            for start in range(0, len(y_tr), batch_size):
-                end = min(start + batch_size, len(y_tr))
-                Xb = X_tr[start:end]
-                yb = y_tr[start:end]
+            for start in range(0, n_tr, batch_size):
+                batch_idx = indices[start:start + batch_size]
+                Xb = [X_tr[i] for i in batch_idx]
+                yb = [y_tr[i] for i in batch_idx]
 
                 # Forward
                 out = self._forward(Xb)
@@ -132,15 +131,25 @@ class Sequential:
                 optimizer.step(self.layers)
                 n_batches += 1
 
+                # Progress indicator every 50 batches
+                if verbose and n_batches % 50 == 0:
+                    print(f"  epoch {epoch+1} step {n_batches}/{max(1, n_tr // batch_size)}"
+                          f" loss={epoch_loss / n_batches:.4f}", flush=True)
+
             epoch_loss /= n_batches
 
-            # Validation
+            # Validation in batches — avoids monolithic forward pass on 424K samples
             self._set_training(False)
-            val_preds_raw = self._forward(X_val)
-            val_preds = [row[-1] if isinstance(row, list) else row for row in val_preds_raw]
-            val_loss = loss(y_val, val_preds)
+            val_preds = []
+            for vs in range(0, len(y_val), batch_size):
+                ve = min(vs + batch_size, len(y_val))
+                vb_out = self._forward(X_val[vs:ve])
+                val_preds += [row[-1] if isinstance(row, list) else row
+                              for row in vb_out]
+
+            val_loss   = loss(y_val, val_preds)
             val_labels = [1 if p >= 0.5 else 0 for p in val_preds]
-            val_acc = accuracy(y_val, val_labels)
+            val_acc    = accuracy(y_val, val_labels)
 
             history["loss"].append(epoch_loss)
             history["val_loss"].append(val_loss)
@@ -148,7 +157,7 @@ class Sequential:
 
             if verbose:
                 print(f"Epoch {epoch+1}/{epochs} | loss={epoch_loss:.4f} "
-                      f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
+                      f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}", flush=True)
 
             # Callbacks (EarlyStopping, LRScheduler)
             stop = False
