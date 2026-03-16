@@ -638,12 +638,17 @@ def save_results(
     n_trees: int,
     elapsed_train: float,
 ) -> None:
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     os.makedirs(os.path.dirname(os.path.abspath(config.RESULTS_OUT)), exist_ok=True)
-    with open(config.RESULTS_OUT, "w") as f:
-        f.write("XGBoost Baseline — iotids Library — CIC-IDS-2017\n")
+    with open(config.RESULTS_OUT, "a") as f:
+        f.write("\n" + "=" * 60 + "\n")
+        f.write(f"XGBoost Baseline — iotids Library — CIC-IDS-2017\n")
+        f.write(f"Run timestamp      : {timestamp}\n")
         f.write("=" * 60 + "\n\n")
         f.write(f"Trees built        : {n_trees}\n")
         f.write(f"Features           : {len(feat_names)}\n")
+        f.write(f"Sample fraction    : {config.SAMPLE_FRAC}\n")
         f.write(f"Decision threshold : {threshold:.4f}\n")
         f.write(f"Training time      : {_fmt_time(elapsed_train)}\n\n")
         for split_name, m in results.items():
@@ -655,7 +660,7 @@ def save_results(
                 else:
                     f.write(f"  {k:<15}: {v}\n")
             f.write("\n")
-    print(f"\n  Results saved to: {config.RESULTS_OUT}")
+    print(f"\n  Results appended to: {config.RESULTS_OUT}")
 
 
 # ============================================================================
@@ -756,13 +761,17 @@ def main():
     # 8. Feature importance
     report_feature_importance(clf, feat_names, top_n=15)
 
-    # 9. Save model
+    # 9. Save model — timestamped filename so runs never overwrite each other
     if config.SAVE_MODEL:
+        import datetime
         _banner("SAVING MODEL")
-        os.makedirs(os.path.dirname(os.path.abspath(config.MODEL_OUT)), exist_ok=True)
-        save_xgb(clf, config.MODEL_OUT)
-        size_kb = os.path.getsize(config.MODEL_OUT) / 1024
-        print(f"  Model saved : {config.MODEL_OUT}  ({size_kb:.1f} KB)")
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        sample_tag = f"s{int(config.SAMPLE_FRAC * 100):03d}"
+        model_path = config.MODEL_OUT.replace(".bin", f"_{sample_tag}_{ts}.bin")
+        os.makedirs(os.path.dirname(os.path.abspath(model_path)), exist_ok=True)
+        save_xgb(clf, model_path)
+        size_kb = os.path.getsize(model_path) / 1024
+        print(f"  Model saved : {model_path}  ({size_kb:.1f} KB)")
 
     # 10. Save results text file
     save_results(
