@@ -245,8 +245,14 @@ def preprocess(data: dict, config: Config):
     X_raw = clip_outliers(X_raw, low_pct=1, high_pct=99)
 
     # Binary label encoding: 0 = BENIGN, 1 = attack
-    BENIGN_LABEL = "BENIGN"
-    y = [0 if str(lbl).strip() == BENIGN_LABEL else 1 for lbl in raw_labels]
+    # Handles both string "BENIGN" and numeric 0.0 / 0 labels
+    def _is_benign(lbl):
+        s = str(lbl).strip()
+        try:
+            return float(s) == 0.0
+        except ValueError:
+            return s == "BENIGN"
+    y = [0 if _is_benign(lbl) else 1 for lbl in raw_labels]
 
     n_benign = sum(1 for v in y if v == 0)
     n_attack = sum(1 for v in y if v == 1)
@@ -274,10 +280,18 @@ def split_and_scale(X: list, y: list, config: Config) -> dict:
     print("DATA SPLITTING AND SCALING")
     print("=" * 80)
 
+    # Two-pass split: first carve out test, then split remainder into train/val
+    # val_size is expressed relative to the full dataset
     ds = Dataset(X, y)
-    train_ds, val_ds, test_ds = ds.train_test_split(
+    trainval_ds, test_ds = ds.train_test_split(
         test_size=config.TEST_SIZE,
-        val_size=config.VAL_SIZE,
+        stratify=True,
+        seed=RANDOM_SEED,
+    )
+    # val fraction relative to the trainval remainder
+    val_frac = config.VAL_SIZE / (1.0 - config.TEST_SIZE)
+    train_ds, val_ds = Dataset(trainval_ds.X, trainval_ds.y).train_test_split(
+        test_size=val_frac,
         stratify=True,
         seed=RANDOM_SEED,
     )
