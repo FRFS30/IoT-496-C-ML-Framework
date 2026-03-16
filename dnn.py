@@ -1,4 +1,4 @@
-"""
+="""
 CIC-IDS-2017 Deep Neural Network Baseline — iotids Library
 ===========================================================
 Trains, evaluates, and quantizes a DNN classifier using only the iotids
@@ -363,21 +363,18 @@ def build_model(n_features: int, config: Config) -> Sequential:
     model = Sequential(layers)
 
     if config.USE_FOCAL_LOSS:
-        loss_fn = FocalLoss(alpha=config.FOCAL_ALPHA, gamma=config.FOCAL_GAMMA)
+        model._loss_fn = FocalLoss(alpha=config.FOCAL_ALPHA, gamma=config.FOCAL_GAMMA)
         print(f"\n  Loss     : FocalLoss(alpha={config.FOCAL_ALPHA}, "
               f"gamma={config.FOCAL_GAMMA})")
     else:
-        loss_fn = BinaryCrossentropy(from_logits=True)
+        model._loss_fn = BinaryCrossentropy(from_logits=True)
         print(f"\n  Loss     : BinaryCrossentropy(from_logits=True)")
 
-    optimizer = Adam(lr=config.LEARNING_RATE)
-    model.compile(loss=loss_fn, optimizer=optimizer,
-                  metrics=["accuracy", "precision", "recall", "auc"])
+    model._optimizer = Adam(lr=config.LEARNING_RATE)
 
     print(f"  Optimizer: Adam(lr={config.LEARNING_RATE})")
     print(f"  Arch     : {n_features} -> " +
           " -> ".join(str(u) for u in config.HIDDEN_UNITS) + " -> 1")
-    print(f"  L2 reg   : {config.L2_REG}")
     print(f"  Dropout  : {config.DROPOUT_RATES}")
     print(f"  Batch    : {config.BATCH_SIZE}  (maximised for throughput)")
 
@@ -419,21 +416,27 @@ def train(model: Sequential, splits: dict, config: Config):
     print()
 
     early_stop = EarlyStopping(
-        monitor="val_recall",
         patience=config.PATIENCE,
-        restore_best_weights=True,
         min_delta=1e-4,
+        restore_best=True,
     )
+
+    # fit() uses an internal validation_split on the data passed to it.
+    # We append val data to train so fit() can carve it back out at the end.
+    X_combined = X_train + X_val
+    y_combined = y_train + y_val
+    val_frac   = len(X_val) / len(X_combined)
 
     t0 = time.time()
     history = model.fit(
-        X_train, y_train,
-        epochs          = config.EPOCHS,
-        batch_size      = config.BATCH_SIZE,
-        validation_data = (X_val, y_val),
-        class_weight    = class_weight,
-        callbacks       = [early_stop],
-        verbose         = 1,
+        X_combined, y_combined,
+        epochs           = config.EPOCHS,
+        batch_size       = config.BATCH_SIZE,
+        validation_split = val_frac,
+        optimizer        = model._optimizer,
+        loss             = model._loss_fn,
+        callbacks        = [early_stop],
+        verbose          = True,
     )
     t_train = time.time() - t0
 
