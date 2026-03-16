@@ -1,1 +1,1 @@
-# core/__init__.py — lazy, no eager imports
+# core/__init__.py — lazy

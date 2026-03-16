@@ -1,1 +1,1 @@
-# prune/__init__.py — lazy, no eager imports
+# prune/__init__.py — lazy

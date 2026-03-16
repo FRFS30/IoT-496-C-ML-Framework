@@ -1,1 +1,1 @@
-# quantize/__init__.py — lazy, no eager imports
+# quantize/__init__.py — lazy
