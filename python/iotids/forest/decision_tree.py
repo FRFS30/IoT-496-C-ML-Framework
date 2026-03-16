@@ -33,23 +33,20 @@ class DecisionTree:
     def fit(self, X, y):
         self.root = self._grow(X, y, depth=0)
         return self
-
     def _grow(self, X, y, depth):
         n = len(y)
         n_pos = sum(y)
         n_neg = n - n_pos
 
         node = _Node()
-        node.prob = n_pos / n if n > 0 else 0.0
+        node.prob  = n_pos / n if n > 0 else 0.0
         node.value = 1 if n_pos >= n_neg else 0
 
-        # Stopping criteria
         if (n < self.min_samples_split
                 or (self.max_depth is not None and depth >= self.max_depth)
                 or n_pos == 0 or n_neg == 0):
             return node
 
-        # Choose features to consider
         n_features = len(X[0])
         if self.max_features is None:
             feat_indices = list(range(n_features))
@@ -60,23 +57,41 @@ class DecisionTree:
         parent_gini = _gini(y)
 
         for f in feat_indices:
-            vals = sorted(set(X[i][f] for i in range(n)))
-            for j in range(len(vals) - 1):
-                thresh = (vals[j] + vals[j + 1]) / 2.0
-                left_y  = [y[i] for i in range(n) if X[i][f] <= thresh]
-                right_y = [y[i] for i in range(n) if X[i][f] >  thresh]
+            # Sort once by feature value — O(n log n) instead of O(n * thresholds)
+            order = sorted(range(n), key=lambda i: X[i][f])
+            f_vals = [X[i][f] for i in order]
+            f_y    = [y[i]    for i in order]
 
-                if len(left_y) < self.min_samples_leaf or len(right_y) < self.min_samples_leaf:
+            # Running counts — O(n) scan instead of rebuilding left/right each time
+            left_pos  = 0
+            left_n    = 0
+            right_pos = n_pos
+            right_n   = n
+
+            for j in range(n - 1):
+                left_pos  += f_y[j]
+                left_n    += 1
+                right_pos -= f_y[j]
+                right_n   -= 1
+
+                # Skip duplicate feature values (no valid split here)
+                if f_vals[j] == f_vals[j + 1]:
+                    continue
+                # Enforce min_samples_leaf
+                if left_n < self.min_samples_leaf or right_n < self.min_samples_leaf:
                     continue
 
-                gain = parent_gini - (
-                    len(left_y)  / n * _gini(left_y) +
-                    len(right_y) / n * _gini(right_y)
-                )
+                left_neg  = left_n  - left_pos
+                right_neg = right_n - right_pos
+
+                left_gini  = 1.0 - (left_pos/left_n)**2   - (left_neg/left_n)**2
+                right_gini = 1.0 - (right_pos/right_n)**2 - (right_neg/right_n)**2
+                gain = parent_gini - (left_n/n * left_gini + right_n/n * right_gini)
+
                 if gain > best_gain:
-                    best_gain  = gain
-                    best_feat  = f
-                    best_thresh = thresh
+                    best_gain   = gain
+                    best_feat   = f
+                    best_thresh = (f_vals[j] + f_vals[j + 1]) / 2.0
 
         if best_feat is None:
             return node
@@ -89,7 +104,6 @@ class DecisionTree:
         node.left  = self._grow([X[i] for i in left_mask],  [y[i] for i in left_mask],  depth + 1)
         node.right = self._grow([X[i] for i in right_mask], [y[i] for i in right_mask], depth + 1)
         return node
-
     # ------------------------------------------------------------------ #
     # Predict
     # ------------------------------------------------------------------ #
