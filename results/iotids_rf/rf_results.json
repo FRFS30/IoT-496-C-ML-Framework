@@ -1,0 +1,502 @@
+{
+  "meta": {
+    "dataset": "processed_reduced/clean_dataset.csv",
+    "sample_frac": 0.1,
+    "repeats": 5,
+    "n_estimators": 100,
+    "max_depth": 20,
+    "min_samples_split": 50,
+    "min_samples_leaf": 20,
+    "max_features": "sqrt",
+    "baseline_ref": "Varun (2025) 99.2%"
+  },
+  "aggregate": {
+    "accuracy": {
+      "mean": 0.9961563598466784,
+      "std": 0.0002749543137586111,
+      "runs": [
+        0.9962729408439758,
+        0.9957076996449579,
+        0.9962552770565064,
+        0.9964319149311995,
+        0.996113966756752
+      ]
+    },
+    "precision": {
+      "mean": 0.9877612083709068,
+      "std": 0.0013177393681257346,
+      "runs": [
+        0.9880453207244179,
+        0.9860108705337254,
+        0.9893540883879048,
+        0.9884903640256959,
+        0.98690539818279
+      ]
+    },
+    "recall": {
+      "mean": 0.9927905308464849,
+      "std": 0.0007909281589382674,
+      "runs": [
+        0.9930954088952654,
+        0.9922883787661406,
+        0.9916606886657102,
+        0.9934540889526542,
+        0.9934540889526542
+      ]
+    },
+    "f1": {
+      "mean": 0.9902689130767784,
+      "std": 0.0006918114036209986,
+      "runs": [
+        0.9905639282679666,
+        0.9891396648044694,
+        0.9905060456784595,
+        0.9909660107334526,
+        0.9901689158995443
+      ]
+    },
+    "auc": {
+      "mean": 0.9997129683768355,
+      "std": 2.4060000540595716e-05,
+      "runs": [
+        0.9997080601068313,
+        0.9997043844272016,
+        0.9996796911975849,
+        0.999733463422042,
+        0.9997392427305176
+      ]
+    },
+    "fpr": {
+      "mean": 0.003017971448054376,
+      "std": 0.00032936604094489417,
+      "runs": [
+        0.002947581443435032,
+        0.0034535096016365674,
+        0.002617628296781857,
+        0.002837597061217307,
+        0.0032335408372011175
+      ]
+    },
+    "fnr": {
+      "mean": 0.007209469153515065,
+      "std": 0.0007909281589383049,
+      "runs": [
+        0.006904591104734577,
+        0.007711621233859397,
+        0.008339311334289813,
+        0.006545911047345768,
+        0.006545911047345768
+      ]
+    }
+  },
+  "feature_importances_aggregate": {
+    "Flow_Duration": {
+      "mean": 0.108395,
+      "std": 0.001087
+    },
+    "Fwd_IAT_Mean": {
+      "mean": 0.094602,
+      "std": 0.001237
+    },
+    "Flow_Bytes_per_s": {
+      "mean": 0.089726,
+      "std": 0.000766
+    },
+    "Init_Win_bytes_forward": {
+      "mean": 0.082829,
+      "std": 0.0015
+    },
+    "Init_Win_bytes_backward": {
+      "mean": 0.082585,
+      "std": 0.000518
+    },
+    "Fwd_Header_Length": {
+      "mean": 0.077862,
+      "std": 0.001566
+    },
+    "Max_Packet_Length": {
+      "mean": 0.071185,
+      "std": 0.001128
+    },
+    "Fwd_Packet_Length_Mean": {
+      "mean": 0.070525,
+      "std": 0.001584
+    },
+    "Bwd_Header_Length": {
+      "mean": 0.065167,
+      "std": 0.000572
+    },
+    "Bwd_IAT_Mean": {
+      "mean": 0.058687,
+      "std": 0.000937
+    },
+    "Idle_Max": {
+      "mean": 0.030606,
+      "std": 0.001194
+    },
+    "Down_per_Up_Ratio": {
+      "mean": 0.026153,
+      "std": 0.001272
+    },
+    "Active_Mean": {
+      "mean": 0.026001,
+      "std": 0.00107
+    },
+    "Active_Max": {
+      "mean": 0.025206,
+      "std": 0.000797
+    },
+    "Min_Packet_Length": {
+      "mean": 0.018951,
+      "std": 0.000819
+    },
+    "URG_Flag_Count": {
+      "mean": 0.016,
+      "std": 0.000742
+    },
+    "ACK_Flag_Count": {
+      "mean": 0.013628,
+      "std": 0.001018
+    },
+    "PSH_Flag_Count": {
+      "mean": 0.011331,
+      "std": 0.000618
+    },
+    "Idle_Std": {
+      "mean": 0.008921,
+      "std": 0.000623
+    },
+    "Fwd_PSH_Flags": {
+      "mean": 0.00859,
+      "std": 0.000723
+    },
+    "FIN_Flag_Count": {
+      "mean": 0.007363,
+      "std": 0.000353
+    },
+    "Active_Std": {
+      "mean": 0.005686,
+      "std": 0.000635
+    },
+    "Fwd_URG_Flags": {
+      "mean": 0.0,
+      "std": 0.0
+    },
+    "ECE_Flag_Count": {
+      "mean": 0.0,
+      "std": 0.0
+    }
+  },
+  "runs": [
+    {
+      "repeat": 1,
+      "seed": 42,
+      "sample_frac": 0.1,
+      "n_train": 198153,
+      "n_val": 28307,
+      "n_test": 56613,
+      "train_time_s": 106.4068,
+      "train": {
+        "accuracy": 0.996493,
+        "precision": 0.988209,
+        "recall": 0.994057,
+        "f1": 0.991124,
+        "auc": 0.999793,
+        "fpr": 0.00291,
+        "fnr": 0.005943
+      },
+      "val": {
+        "accuracy": 0.996361,
+        "precision": 0.989097,
+        "recall": 0.992468,
+        "f1": 0.99078,
+        "auc": 0.999718,
+        "fpr": 0.002684,
+        "fnr": 0.007532
+      },
+      "test": {
+        "accuracy": 0.996273,
+        "precision": 0.988045,
+        "recall": 0.993095,
+        "f1": 0.990564,
+        "auc": 0.999708,
+        "fpr": 0.002948,
+        "fnr": 0.006905
+      },
+      "feature_importances": {
+        "Flow_Duration": 0.107601,
+        "Fwd_Packet_Length_Mean": 0.067804,
+        "Flow_Bytes_per_s": 0.090358,
+        "Fwd_IAT_Mean": 0.095997,
+        "Bwd_IAT_Mean": 0.059509,
+        "Fwd_PSH_Flags": 0.008248,
+        "Fwd_URG_Flags": 0.0,
+        "Fwd_Header_Length": 0.080432,
+        "Bwd_Header_Length": 0.065986,
+        "Min_Packet_Length": 0.018733,
+        "Max_Packet_Length": 0.07032,
+        "FIN_Flag_Count": 0.007782,
+        "PSH_Flag_Count": 0.012023,
+        "ACK_Flag_Count": 0.012349,
+        "URG_Flag_Count": 0.016916,
+        "ECE_Flag_Count": 0.0,
+        "Down_per_Up_Ratio": 0.027075,
+        "Init_Win_bytes_forward": 0.083741,
+        "Init_Win_bytes_backward": 0.082669,
+        "Active_Mean": 0.024279,
+        "Active_Std": 0.004707,
+        "Active_Max": 0.024512,
+        "Idle_Std": 0.009507,
+        "Idle_Max": 0.029452
+      }
+    },
+    {
+      "repeat": 2,
+      "seed": 43,
+      "sample_frac": 0.1,
+      "n_train": 198153,
+      "n_val": 28307,
+      "n_test": 56613,
+      "train_time_s": 111.7664,
+      "train": {
+        "accuracy": 0.996281,
+        "precision": 0.987475,
+        "recall": 0.993724,
+        "f1": 0.99059,
+        "auc": 0.999757,
+        "fpr": 0.003092,
+        "fnr": 0.006276
+      },
+      "val": {
+        "accuracy": 0.995549,
+        "precision": 0.986955,
+        "recall": 0.990495,
+        "f1": 0.988722,
+        "auc": 0.999699,
+        "fpr": 0.003211,
+        "fnr": 0.009505
+      },
+      "test": {
+        "accuracy": 0.995708,
+        "precision": 0.986011,
+        "recall": 0.992288,
+        "f1": 0.98914,
+        "auc": 0.999704,
+        "fpr": 0.003454,
+        "fnr": 0.007712
+      },
+      "feature_importances": {
+        "Flow_Duration": 0.110185,
+        "Fwd_Packet_Length_Mean": 0.070843,
+        "Flow_Bytes_per_s": 0.089035,
+        "Fwd_IAT_Mean": 0.094143,
+        "Bwd_IAT_Mean": 0.057355,
+        "Fwd_PSH_Flags": 0.008424,
+        "Fwd_URG_Flags": 0.0,
+        "Fwd_Header_Length": 0.077699,
+        "Bwd_Header_Length": 0.065063,
+        "Min_Packet_Length": 0.019402,
+        "Max_Packet_Length": 0.069947,
+        "FIN_Flag_Count": 0.007618,
+        "PSH_Flag_Count": 0.011874,
+        "ACK_Flag_Count": 0.014384,
+        "URG_Flag_Count": 0.015952,
+        "ECE_Flag_Count": 0.0,
+        "Down_per_Up_Ratio": 0.026975,
+        "Init_Win_bytes_forward": 0.082583,
+        "Init_Win_bytes_backward": 0.082762,
+        "Active_Mean": 0.026616,
+        "Active_Std": 0.00587,
+        "Active_Max": 0.024914,
+        "Idle_Std": 0.009051,
+        "Idle_Max": 0.029305
+      }
+    },
+    {
+      "repeat": 3,
+      "seed": 44,
+      "sample_frac": 0.1,
+      "n_train": 198153,
+      "n_val": 28307,
+      "n_test": 56613,
+      "train_time_s": 116.2275,
+      "train": {
+        "accuracy": 0.996669,
+        "precision": 0.988941,
+        "recall": 0.99421,
+        "f1": 0.991569,
+        "auc": 0.999776,
+        "fpr": 0.002728,
+        "fnr": 0.00579
+      },
+      "val": {
+        "accuracy": 0.996149,
+        "precision": 0.987342,
+        "recall": 0.993185,
+        "f1": 0.990255,
+        "auc": 0.999524,
+        "fpr": 0.003123,
+        "fnr": 0.006815
+      },
+      "test": {
+        "accuracy": 0.996255,
+        "precision": 0.989354,
+        "recall": 0.991661,
+        "f1": 0.990506,
+        "auc": 0.99968,
+        "fpr": 0.002618,
+        "fnr": 0.008339
+      },
+      "feature_importances": {
+        "Flow_Duration": 0.1084,
+        "Fwd_Packet_Length_Mean": 0.070881,
+        "Flow_Bytes_per_s": 0.090426,
+        "Fwd_IAT_Mean": 0.094538,
+        "Bwd_IAT_Mean": 0.058128,
+        "Fwd_PSH_Flags": 0.008086,
+        "Fwd_URG_Flags": 0.0,
+        "Fwd_Header_Length": 0.076241,
+        "Bwd_Header_Length": 0.06492,
+        "Min_Packet_Length": 0.017605,
+        "Max_Packet_Length": 0.072729,
+        "FIN_Flag_Count": 0.006885,
+        "PSH_Flag_Count": 0.011321,
+        "ACK_Flag_Count": 0.014555,
+        "URG_Flag_Count": 0.016542,
+        "ECE_Flag_Count": 0.0,
+        "Down_per_Up_Ratio": 0.027123,
+        "Init_Win_bytes_forward": 0.080399,
+        "Init_Win_bytes_backward": 0.08331,
+        "Active_Mean": 0.025737,
+        "Active_Std": 0.006376,
+        "Active_Max": 0.025552,
+        "Idle_Std": 0.009241,
+        "Idle_Max": 0.031005
+      }
+    },
+    {
+      "repeat": 4,
+      "seed": 45,
+      "sample_frac": 0.1,
+      "n_train": 198153,
+      "n_val": 28307,
+      "n_test": 56613,
+      "train_time_s": 109.8936,
+      "train": {
+        "accuracy": 0.996407,
+        "precision": 0.988278,
+        "recall": 0.993544,
+        "f1": 0.990904,
+        "auc": 0.999772,
+        "fpr": 0.002891,
+        "fnr": 0.006456
+      },
+      "val": {
+        "accuracy": 0.99622,
+        "precision": 0.989265,
+        "recall": 0.991571,
+        "f1": 0.990416,
+        "auc": 0.999772,
+        "fpr": 0.00264,
+        "fnr": 0.008429
+      },
+      "test": {
+        "accuracy": 0.996432,
+        "precision": 0.98849,
+        "recall": 0.993454,
+        "f1": 0.990966,
+        "auc": 0.999733,
+        "fpr": 0.002838,
+        "fnr": 0.006546
+      },
+      "feature_importances": {
+        "Flow_Duration": 0.108336,
+        "Fwd_Packet_Length_Mean": 0.071943,
+        "Flow_Bytes_per_s": 0.088784,
+        "Fwd_IAT_Mean": 0.092828,
+        "Bwd_IAT_Mean": 0.058923,
+        "Fwd_PSH_Flags": 0.009865,
+        "Fwd_URG_Flags": 0.0,
+        "Fwd_Header_Length": 0.077808,
+        "Bwd_Header_Length": 0.065411,
+        "Min_Packet_Length": 0.019508,
+        "Max_Packet_Length": 0.071098,
+        "FIN_Flag_Count": 0.007199,
+        "PSH_Flag_Count": 0.010754,
+        "ACK_Flag_Count": 0.014131,
+        "URG_Flag_Count": 0.015108,
+        "ECE_Flag_Count": 0.0,
+        "Down_per_Up_Ratio": 0.025196,
+        "Init_Win_bytes_forward": 0.083141,
+        "Init_Win_bytes_backward": 0.081985,
+        "Active_Mean": 0.026351,
+        "Active_Std": 0.005999,
+        "Active_Max": 0.024618,
+        "Idle_Std": 0.008932,
+        "Idle_Max": 0.032083
+      }
+    },
+    {
+      "repeat": 5,
+      "seed": 46,
+      "sample_frac": 0.1,
+      "n_train": 198153,
+      "n_val": 28307,
+      "n_test": 56613,
+      "train_time_s": 109.1283,
+      "train": {
+        "accuracy": 0.996114,
+        "precision": 0.986473,
+        "recall": 0.993903,
+        "f1": 0.990174,
+        "auc": 0.999766,
+        "fpr": 0.003343,
+        "fnr": 0.006097
+      },
+      "val": {
+        "accuracy": 0.996856,
+        "precision": 0.989998,
+        "recall": 0.994082,
+        "f1": 0.992036,
+        "auc": 0.999749,
+        "fpr": 0.002464,
+        "fnr": 0.005918
+      },
+      "test": {
+        "accuracy": 0.996114,
+        "precision": 0.986905,
+        "recall": 0.993454,
+        "f1": 0.990169,
+        "auc": 0.999739,
+        "fpr": 0.003234,
+        "fnr": 0.006546
+      },
+      "feature_importances": {
+        "Flow_Duration": 0.107455,
+        "Fwd_Packet_Length_Mean": 0.071154,
+        "Flow_Bytes_per_s": 0.090029,
+        "Fwd_IAT_Mean": 0.095505,
+        "Bwd_IAT_Mean": 0.059521,
+        "Fwd_PSH_Flags": 0.008328,
+        "Fwd_URG_Flags": 0.0,
+        "Fwd_Header_Length": 0.077129,
+        "Bwd_Header_Length": 0.064455,
+        "Min_Packet_Length": 0.019508,
+        "Max_Packet_Length": 0.071833,
+        "FIN_Flag_Count": 0.007333,
+        "PSH_Flag_Count": 0.010682,
+        "ACK_Flag_Count": 0.012719,
+        "URG_Flag_Count": 0.01548,
+        "ECE_Flag_Count": 0.0,
+        "Down_per_Up_Ratio": 0.024397,
+        "Init_Win_bytes_forward": 0.08428,
+        "Init_Win_bytes_backward": 0.082198,
+        "Active_Mean": 0.027022,
+        "Active_Std": 0.005477,
+        "Active_Max": 0.026434,
+        "Idle_Std": 0.007876,
+        "Idle_Max": 0.031186
+      }
+    }
+  ]
+}
