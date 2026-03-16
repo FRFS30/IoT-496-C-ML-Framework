@@ -11,13 +11,14 @@ Environment (CSE 19)
     cd /scratch/yjh5327/CMPSC496
     python3 -u xgboost.py --data processed_reduced/clean_dataset.csv
 
-Run in the background (recommended for full dataset):
-    nohup python3 -u xgboost.py --data processed_reduced/clean_dataset.csv \
+Default run (10% sample, ~283K rows, ~30-60 min):
+    nohup python3 -u xg_boost.py --data processed_reduced/clean_dataset.csv \
         > logs/xgb_run.log 2>&1 &
     tail -f logs/xgb_run.log
 
-Quick smoke test on 10% sample:
-    python3 -u xgboost.py --data processed_reduced/clean_dataset.csv --sample 0.1
+Full dataset (2.8M rows — expect several hours, pure Python):
+    nohup python3 -u xg_boost.py --data processed_reduced/clean_dataset.csv \
+        --sample 1.0 > logs/xgb_full.log 2>&1 &
 
 Expected results (full dataset, default hyperparams):
     Accuracy  : ~99%
@@ -79,7 +80,8 @@ from iotids.data.preprocessing import (
 class Config:
     # ── Data ────────────────────────────────────────────────────────────────
     DATA_FILE       = "processed_reduced/clean_dataset.csv"
-    SAMPLE_FRAC     = 1.0           # 1.0 = full dataset; 0.1 for quick test
+    SAMPLE_FRAC     = 0.1           # 0.1 = ~283K rows, completes in ~30-60 min
+                                    # set --sample 1.0 for the full 2.8M row run
 
     # ── Split ────────────────────────────────────────────────────────────────
     TRAIN_FRAC      = 0.70
@@ -314,7 +316,21 @@ def preprocess(data: dict, config: Config) -> tuple:
     X_raw = clip_outliers(X_raw, low_pct=1, high_pct=99)
 
     # Binary labels: 0 = BENIGN, 1 = attack
-    y = [0 if str(lbl).strip() == "BENIGN" else 1 for lbl in raw_labels]
+    # Handles both:
+    #   processed_reduced/clean_dataset.csv  -> numeric  "0.0" / "1.0"
+    #   raw CIC-IDS-2017 CSVs               -> string   "BENIGN" / attack name
+    def _to_binary(lbl) -> int:
+        s = str(lbl).strip()
+        try:
+            return 0 if float(s) == 0.0 else 1   # numeric labels
+        except ValueError:
+            return 0 if s == "BENIGN" else 1       # string labels
+
+    # Diagnose before encoding so bad labels are visible immediately
+    raw_unique = list(set(str(l).strip() for l in raw_labels))
+    print(f"  Raw label values (up to 10): {raw_unique[:10]}")
+
+    y = [_to_binary(lbl) for lbl in raw_labels]
 
     n_total  = len(y)
     n_benign = sum(1 for v in y if v == 0)
