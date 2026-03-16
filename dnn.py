@@ -115,7 +115,6 @@ class Config:
     # Architecture — proven DNN baseline (256→128→64→1)
     HIDDEN_UNITS  = [256, 128, 64]
     DROPOUT_RATES = [0.4,  0.4,  0.3]
-    L2_REG        = 0.01
 
     # Loss (focal loss handles 80/20 class imbalance)
     USE_FOCAL_LOSS = True
@@ -353,14 +352,13 @@ def build_model(n_features: int, config: Config) -> Sequential:
     in_size = n_features
 
     for units, drop in zip(config.HIDDEN_UNITS, config.DROPOUT_RATES):
-        layers.append(Dense(units, activation="relu",
-                            input_size=in_size, l2_reg=config.L2_REG))
+        layers.append(Dense(in_size, units, activation="relu"))
         layers.append(BatchNormalization(units))
         layers.append(Dropout(drop))
         in_size = units
 
     # Output: single logit (no activation — FocalLoss handles sigmoid internally)
-    layers.append(Dense(1, activation=None, input_size=in_size))
+    layers.append(Dense(in_size, 1, activation=None))
 
     model = Sequential(layers)
 
