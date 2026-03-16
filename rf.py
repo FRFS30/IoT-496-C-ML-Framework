@@ -263,7 +263,7 @@ def split_and_scale(X, y, config: Config):
     print(f"  Test  : {len(X_test):,}  ({len(X_test)/n_total*100:.1f}%)")
 
     print("\n  Fitting RobustScaler on training data...")
-    scaler = RobustScaler(quantile_range=(5, 95))
+    scaler = RobustScaler()
     X_train_s = scaler.fit_transform(X_train)
     X_val_s   = scaler.transform(X_val)
     X_test_s  = scaler.transform(X_test)
@@ -337,7 +337,7 @@ def evaluate(model, X, y, split_name: str, feature_names=None):
     auc   = roc_auc(y, y_score)
     cm, _ = confusion_matrix(y, y_pred)
 
-    
+
     tn, fp, fn, tp = cm[0][0], cm[0][1], cm[1][0], cm[1][1]
     fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
     fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
