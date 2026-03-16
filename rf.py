@@ -335,8 +335,9 @@ def evaluate(model, X, y, split_name: str, feature_names=None):
     rec   = recall(y, y_pred)
     f1    = f1_score(y, y_pred)
     auc   = roc_auc(y, y_score)
-    cm    = confusion_matrix(y, y_pred)
+    cm, _ = confusion_matrix(y, y_pred)
 
+    
     tn, fp, fn, tp = cm[0][0], cm[0][1], cm[1][0], cm[1][1]
     fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
     fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
