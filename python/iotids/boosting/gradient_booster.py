@@ -117,6 +117,7 @@ class GradientBooster:
         reg_alpha: float = 0.0,
         min_gain: float = 0.0,
         base_score: float = 0.5,
+        n_jobs: int = -1,
     ) -> None:
         # Validate hyperparameters
         if n_estimators < 1:
@@ -142,6 +143,7 @@ class GradientBooster:
         self.reg_alpha         = reg_alpha
         self.min_gain          = min_gain
         self.base_score        = base_score
+        self.n_jobs            = n_jobs
 
         # State populated by fit()
         self._trees:          List[BoostingTree] = []
@@ -261,6 +263,7 @@ class GradientBooster:
                 min_child_weight=self.min_child_weight,
                 reg_lambda=self.reg_lambda,
                 min_gain=self.min_gain,
+                n_jobs=self.n_jobs,
             )
             tree.fit(X_sub, g_sub, h_sub, feature_cols=col_idx)
 

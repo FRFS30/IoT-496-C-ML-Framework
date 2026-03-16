@@ -120,6 +120,7 @@ class XGBoostClassifier:
         base_score: float = 0.5,
         early_stopping_rounds: int = 10,
         seed: int = 42,
+        n_jobs: int = -1,
     ) -> None:
         self.n_estimators           = n_estimators
         self.learning_rate          = learning_rate
@@ -133,6 +134,7 @@ class XGBoostClassifier:
         self.base_score             = base_score
         self.early_stopping_rounds  = early_stopping_rounds
         self.seed                   = seed
+        self.n_jobs                 = n_jobs
 
         self._booster: Optional[GradientBooster] = None
         self._best_n_trees: int = 0
@@ -155,6 +157,7 @@ class XGBoostClassifier:
             reg_alpha=self.reg_alpha,
             min_gain=self.min_gain,
             base_score=self.base_score,
+            n_jobs=self.n_jobs,
         )
 
     # ------------------------------------------------------------------
@@ -553,6 +556,7 @@ class XGBoostClassifier:
             "base_score":             self.base_score,
             "early_stopping_rounds":  self.early_stopping_rounds,
             "seed":                   self.seed,
+            "n_jobs":                 self.n_jobs,
         }
 
     def set_params(self, **params: Any) -> "XGBoostClassifier":
