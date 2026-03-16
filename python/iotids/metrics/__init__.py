@@ -1,1 +1,1 @@
-# metrics/__init__.py — lazy, no eager imports
+# metrics/__init__.py — lazy

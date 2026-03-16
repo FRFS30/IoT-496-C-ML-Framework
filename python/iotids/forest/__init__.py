@@ -1,1 +1,1 @@
-# forest/__init__.py — lazy, no eager imports
+# forest/__init__.py — lazy

@@ -1,1 +1,1 @@
-# nn/__init__.py — lazy, no eager imports
+# nn/__init__.py — lazy

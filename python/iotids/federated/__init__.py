@@ -1,1 +1,1 @@
-# federated/__init__.py — lazy, no eager imports
+# federated/__init__.py — lazy

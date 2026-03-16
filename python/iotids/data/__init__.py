@@ -1,1 +1,1 @@
-# data/__init__.py — lazy, no eager imports
+# data/__init__.py — lazy
