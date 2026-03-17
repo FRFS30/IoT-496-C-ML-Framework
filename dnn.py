@@ -8,38 +8,23 @@ pandas dependency at any stage.
 Pipeline
 --------
   1. Load + preprocess CIC-IDS-2017 (full or sampled)
-  2. Train DNN with FocalLoss + Adam + EarlyStopping
+  2. Train DNN with weighted BCE + Adam + EarlyStopping
   3. Evaluate on train/val/test splits
   4. Magnitude pruning (zeroes bottom-N% weights, fine-tunes 3 epochs)
-  5. INT8 post-training quantization (per-layer symmetric, calibrated on val set)
+  5. INT8 post-training quantization (per-layer symmetric)
   6. Save compact .bin files (pure struct — no pickle, no external deps)
 
 Output files  (models/iotids_dnn/)
 ------------------------------------
   iotids_dnn.bin        — pruned + INT8-quantized weights, pure binary
-                          Format per Dense layer:
-                            [in_features: i32][units: i32]
-                            [scale_W: f32][zp_W: i8 padded to 4B]
-                            [W_q: in_features*units i8 values]
-                            [scale_b: f32][zp_b: i8 padded to 4B]
-                            [b_q: units i8 values]
-                          BatchNorm layers stored as float32 (4 arrays × features).
-                          Dropout layers: no weights stored.
-                          File header: magic 0xD1D5 [u16], n_layers [i32]
-  iotids_dnn_f32.bin    — float32 pruned weights (fallback, C runtime can use
-                          this if INT8 accuracy is unacceptable)
+  iotids_dnn_f32.bin    — float32 pruned weights (C runtime fallback)
   iotids_dnn_scaler.bin — RobustScaler params (median + IQR as float32)
   iotids_dnn_threshold.bin — optimal decision threshold (float32)
 
 Run
 ---
-  # Full dataset (overnight):
   nohup python3 -u dnn.py --data processed_reduced/clean_dataset.csv > dnn.log 2>&1 &
-
-  # Quick smoke-test (10% sample):
   python3 dnn.py --data processed_reduced/clean_dataset.csv --sample 0.1
-
-  # Skip pruning/quantization (faster debugging):
   python3 dnn.py --data processed_reduced/clean_dataset.csv --no-compress
 """
 
@@ -51,9 +36,6 @@ import sys
 import time
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Resolve iotids package: python/iotids relative to this script.
-# ---------------------------------------------------------------------------
 _HERE = Path(__file__).resolve().parent
 _PYTHON_DIR = _HERE / "python"
 if str(_PYTHON_DIR) not in sys.path:
@@ -65,17 +47,68 @@ from iotids.data.preprocessing import (
 )
 from iotids.data.dataset       import Dataset
 from iotids.nn.layers          import Dense, BatchNormalization, Dropout
-from iotids.nn.losses          import FocalLoss, BinaryCrossentropy
+from iotids.nn.losses          import BinaryCrossentropy
 from iotids.nn.optimizers      import Adam
 from iotids.nn.model           import Sequential, EarlyStopping
 from iotids.metrics.classification import (
     accuracy, precision, recall, f1_score, roc_auc,
     confusion_matrix, threshold_sweep,
 )
-from iotids.utils.io    import save, load
+from iotids.utils.io     import save, load
 from iotids.utils.random import set_seed
 
 RANDOM_SEED = 42
+
+
+# ============================================================================
+# WEIGHTED BCE  (in-place gradient scaling — no library changes needed)
+# ============================================================================
+
+class WeightedBCE:
+    """
+    Binary cross-entropy with per-sample class weighting.
+    pos_weight scales the gradient for attack (y=1) samples.
+    This is the standard fix for class imbalance without oversampling alone.
+
+    n_benign / n_attack ≈ 2.0x after oversampling — matches class_weight
+    already computed in train(). Passing pos_weight here closes the
+    accuracy gap vs the TF baseline which used class_weight in fit().
+    """
+
+    def __init__(self, pos_weight: float = 2.0, from_logits: bool = True):
+        self.pos_weight  = pos_weight
+        self.from_logits = from_logits
+
+    def _sigmoid(self, v):
+        if v >= 0:
+            return 1.0 / (1.0 + math.exp(-v))
+        e = math.exp(v)
+        return e / (1.0 + e)
+
+    def __call__(self, y_true, y_pred):
+        eps = 1e-9
+        n   = len(y_true)
+        total = 0.0
+        for yt, yp in zip(y_true, y_pred):
+            p   = self._sigmoid(yp) if self.from_logits else yp
+            p   = max(eps, min(1.0 - eps, p))
+            w   = self.pos_weight if yt == 1 else 1.0
+            total -= w * (yt * math.log(p) + (1.0 - yt) * math.log(1.0 - p))
+        return total / n
+
+    def gradient(self, y_true, y_pred):
+        eps = 1e-9
+        n   = len(y_true)
+        grads = []
+        for yt, yp in zip(y_true, y_pred):
+            w = self.pos_weight if yt == 1 else 1.0
+            if self.from_logits:
+                p = self._sigmoid(yp)
+                grads.append(w * (p - yt) / n)
+            else:
+                p = max(eps, min(1.0 - eps, yp))
+                grads.append(w * (-yt / p + (1.0 - yt) / (1.0 - p)) / n)
+        return grads
 
 
 # ============================================================================
@@ -101,12 +134,7 @@ class Config:
 
     # Architecture
     HIDDEN_UNITS  = [256, 128, 64]
-    DROPOUT_RATES = [0.4,  0.4,  0.3]
-
-    # Loss
-    USE_FOCAL_LOSS = False
-    FOCAL_ALPHA    = 0.70
-    FOCAL_GAMMA    = 1.8
+    DROPOUT_RATES = [0.4, 0.4, 0.3]
 
     # Decision threshold
     DECISION_THRESHOLD = 0.4
@@ -116,12 +144,12 @@ class Config:
     USE_OVERSAMPLING  = True
     OVERSAMPLE_RATIO  = 0.5
 
-    # Pruning — applied after main training, before quantization
-    ENABLE_PRUNING    = True
-    PRUNE_SPARSITY    = 0.40   # zero out bottom 40% of weights by magnitude
-    PRUNE_FINETUNE_EPOCHS = 3  # fine-tune epochs after pruning to recover accuracy
+    # Pruning
+    ENABLE_PRUNING        = True
+    PRUNE_SPARSITY        = 0.40
+    PRUNE_FINETUNE_EPOCHS = 3
 
-    # Quantization — INT8 per-layer symmetric, calibrated on val set
+    # Quantization
     ENABLE_QUANTIZATION = True
 
     # Columns to exclude
@@ -144,8 +172,7 @@ def load_data(config: Config) -> dict:
         raise FileNotFoundError(f"\n  Dataset not found: {config.DATA_FILE}")
 
     print(f"\n  Loading: {config.DATA_FILE}")
-    data = read_csv(str(config.DATA_FILE))
-
+    data   = read_csv(str(config.DATA_FILE))
     n_rows = len(next(iter(data.values())))
     print(f"  Loaded {n_rows:,} rows, {len(data)} columns")
 
@@ -169,8 +196,8 @@ def load_data(config: Config) -> dict:
         for cls_indices in by_class.values():
             k = max(1, int(len(cls_indices) * frac))
             keep.update(_rnd.sample(cls_indices, k))
-        data = {col: [v for i, v in enumerate(vals) if i in keep]
-                for col, vals in data.items()}
+        data   = {col: [v for i, v in enumerate(vals) if i in keep]
+                  for col, vals in data.items()}
         n_rows = len(next(iter(data.values())))
         print(f"  Sample size: {n_rows:,}")
 
@@ -260,7 +287,7 @@ def split_and_scale(X: list, y: list, config: Config) -> dict:
     print(f"  Test  : {len(test_ds.X):,}  ({config.TEST_SIZE*100:.1f}%)")
 
     print("  Fitting RobustScaler on training data...")
-    scaler = RobustScaler()
+    scaler         = RobustScaler()
     X_train_scaled = scaler.fit_transform(train_ds.X)
     X_val_scaled   = scaler.transform(val_ds.X)
     X_test_scaled  = scaler.transform(test_ds.X)
@@ -269,13 +296,14 @@ def split_and_scale(X: list, y: list, config: Config) -> dict:
     y_train = list(train_ds.y)
 
     if config.USE_OVERSAMPLING:
-        benign_idx  = [i for i, v in enumerate(y_train) if v == 0]
-        attack_idx  = [i for i, v in enumerate(y_train) if v == 1]
+        benign_idx      = [i for i, v in enumerate(y_train) if v == 0]
+        attack_idx      = [i for i, v in enumerate(y_train) if v == 1]
         target_n_attack = int(len(benign_idx) * config.OVERSAMPLE_RATIO)
         if target_n_attack > len(attack_idx):
             import random as _rnd
             _rnd.seed(RANDOM_SEED)
-            extra = _rnd.choices(attack_idx, k=target_n_attack - len(attack_idx))
+            extra          = _rnd.choices(attack_idx,
+                                          k=target_n_attack - len(attack_idx))
             X_train_scaled = X_train_scaled + [X_train_scaled[i] for i in extra]
             y_train        = y_train + [1] * len(extra)
             print(f"  Oversampled: {len(attack_idx):,} → {target_n_attack:,} attacks"
@@ -293,12 +321,13 @@ def split_and_scale(X: list, y: list, config: Config) -> dict:
 # MODEL BUILD
 # ============================================================================
 
-def build_model(n_features: int, config: Config) -> Sequential:
+def build_model(n_features: int, config: Config,
+                pos_weight: float = 2.0) -> Sequential:
     print("\n" + "=" * 80)
     print("MODEL ARCHITECTURE  (iotids.nn)")
     print("=" * 80)
 
-    layers = []
+    layers  = []
     in_size = n_features
     for units, drop in zip(config.HIDDEN_UNITS, config.DROPOUT_RATES):
         layers.append(Dense(in_size, units, activation="relu"))
@@ -307,17 +336,11 @@ def build_model(n_features: int, config: Config) -> Sequential:
         in_size = units
     layers.append(Dense(in_size, 1, activation=None))
 
-    model = Sequential(layers)
+    model              = Sequential(layers)
+    model._loss_fn     = WeightedBCE(pos_weight=pos_weight, from_logits=True)
+    model._optimizer   = Adam(lr=config.LEARNING_RATE)
 
-    if config.USE_FOCAL_LOSS:
-        model._loss_fn = FocalLoss(alpha=config.FOCAL_ALPHA, gamma=config.FOCAL_GAMMA,
-                                   from_logits=True)
-        print(f"\n  Loss     : FocalLoss(alpha={config.FOCAL_ALPHA}, gamma={config.FOCAL_GAMMA})")
-    else:
-        model._loss_fn = BinaryCrossentropy(from_logits=True)
-        print(f"\n  Loss     : BinaryCrossentropy(from_logits=True)")
-
-    model._optimizer = Adam(lr=config.LEARNING_RATE)
+    print(f"\n  Loss     : WeightedBCE(pos_weight={pos_weight:.2f}, from_logits=True)")
     print(f"  Optimizer: Adam(lr={config.LEARNING_RATE})")
     print(f"  Arch     : {n_features} -> " +
           " -> ".join(str(u) for u in config.HIDDEN_UNITS) + " -> 1")
@@ -340,10 +363,7 @@ def train(model: Sequential, splits: dict, config: Config,
     y_train = splits["y_train"]
     X_val   = splits["X_val"]
     y_val   = splits["y_val"]
-
-    n_benign = sum(1 for v in y_train if v == 0)
-    n_attack = sum(1 for v in y_train if v == 1)
-    epochs   = extra_epochs if extra_epochs is not None else config.EPOCHS
+    epochs  = extra_epochs if extra_epochs is not None else config.EPOCHS
 
     print(f"\n  Training samples   : {len(X_train):,}")
     print(f"  Validation samples : {len(X_val):,}")
@@ -375,25 +395,14 @@ def train(model: Sequential, splits: dict, config: Config,
 
 
 # ============================================================================
-# PRUNING  (magnitude-based, applied in-place on Dense weight lists)
+# PRUNING
 # ============================================================================
 
 def prune_model(model: Sequential, splits: dict, config: Config) -> float:
-    """
-    Zero out the bottom PRUNE_SPARSITY fraction of weights by absolute
-    magnitude across all Dense layers, then fine-tune for a few epochs to
-    recover accuracy.
-
-    Works entirely with the weights as Python lists (get_weights /
-    set_weights) — no numpy required, no library changes.
-
-    Returns actual achieved sparsity (float).
-    """
     print("\n" + "=" * 80)
     print("PRUNING  (magnitude-based)")
     print("=" * 80)
 
-    # ── 1. Collect all Dense weight magnitudes ──────────────────────────────
     all_magnitudes = []
     for layer in model.layers:
         if isinstance(layer, Dense):
@@ -403,285 +412,220 @@ def prune_model(model: Sequential, splits: dict, config: Config) -> float:
 
     all_magnitudes.sort()
     threshold_idx = int(len(all_magnitudes) * config.PRUNE_SPARSITY)
-    threshold     = all_magnitudes[threshold_idx]
+    mag_threshold = all_magnitudes[threshold_idx]
 
     print(f"\n  Total Dense weights : {len(all_magnitudes):,}")
     print(f"  Sparsity target     : {config.PRUNE_SPARSITY * 100:.0f}%")
-    print(f"  Magnitude threshold : {threshold:.6f}")
+    print(f"  Magnitude threshold : {mag_threshold:.6f}")
 
-    # ── 2. Apply mask — zero weights below threshold ─────────────────────────
     zeroed = 0
     for layer in model.layers:
         if isinstance(layer, Dense):
             flat_W, b = layer.get_weights()
-            flat_W = [0.0 if abs(w) < threshold else w for w in flat_W]
-            zeroed += sum(1 for w in flat_W if w == 0.0)
+            flat_W    = [0.0 if abs(w) < mag_threshold else w for w in flat_W]
+            zeroed   += sum(1 for w in flat_W if w == 0.0)
             layer.set_weights([flat_W, b])
 
     actual_sparsity = zeroed / max(len(all_magnitudes), 1)
     print(f"  Weights zeroed      : {zeroed:,}  (actual {actual_sparsity*100:.1f}%)")
 
-    # ── 3. Fine-tune to recover accuracy ────────────────────────────────────
     if config.PRUNE_FINETUNE_EPOCHS > 0:
         print(f"\n  Fine-tuning {config.PRUNE_FINETUNE_EPOCHS} epoch(s) after pruning...")
-        # Use a lower LR for fine-tuning
-        orig_lr = model._optimizer.lr
-        model._optimizer.lr = orig_lr * 0.2
+        orig_lr              = model._optimizer.lr
+        model._optimizer.lr  = orig_lr * 0.2
         train(model, splits, config,
               extra_epochs=config.PRUNE_FINETUNE_EPOCHS,
               tag="PRUNING FINE-TUNE")
-        model._optimizer.lr = orig_lr
+        model._optimizer.lr  = orig_lr
 
     return actual_sparsity
 
 
 # ============================================================================
-# INT8 QUANTIZATION  (per-layer symmetric, calibrated on val set)
+# INT8 QUANTIZATION
 # ============================================================================
 
-def _compute_scale_zp(values: list, n_bits: int = 8):
-    """
-    Symmetric per-tensor quantization.
-    scale = max(|values|) / 127
-    zero_point = 0  (symmetric)
-    q = clamp(round(v / scale), -128, 127)
-    """
+def _compute_scale_zp(values: list):
     max_abs = max(abs(v) for v in values) if values else 1.0
     if max_abs == 0.0:
         max_abs = 1.0
-    scale = max_abs / 127.0
-    return scale, 0
+    return max_abs / 127.0, 0
 
 
 def _quantize_array(values: list, scale: float, zp: int) -> list:
-    """Quantize list of floats to int8 range [-128, 127]."""
-    q = []
-    for v in values:
-        qi = int(round(v / scale)) + zp
-        qi = max(-128, min(127, qi))
-        q.append(qi)
-    return q
+    return [max(-128, min(127, int(round(v / scale)) + zp)) for v in values]
 
 
 def quantize_model(model: Sequential) -> dict:
-    """
-    Post-training INT8 quantization.
-    Returns a dict mapping layer index → quantization params + quantized weights.
-    Dense layers: W and b quantized to int8.
-    BatchNorm / Dropout: kept as float32 (small, and critical for accuracy).
-    """
     print("\n" + "=" * 80)
     print("QUANTIZATION  (INT8 per-layer symmetric)")
     print("=" * 80)
 
-    quant_data = {}
-    total_bytes_f32 = 0
+    quant_data       = {}
+    total_bytes_f32  = 0
     total_bytes_int8 = 0
 
     for idx, layer in enumerate(model.layers):
         if isinstance(layer, Dense):
-            flat_W, b = layer.get_weights()
-
+            flat_W, b     = layer.get_weights()
             scale_W, zp_W = _compute_scale_zp(flat_W)
             W_q           = _quantize_array(flat_W, scale_W, zp_W)
-
             scale_b, zp_b = _compute_scale_zp(b) if b else (1.0, 0)
             b_q           = _quantize_array(b, scale_b, zp_b) if b else []
 
             quant_data[idx] = {
-                "type":    "Dense",
+                "type": "Dense",
                 "in_features": layer.in_features,
                 "units":       layer.units,
                 "scale_W": scale_W, "zp_W": zp_W, "W_q": W_q,
                 "scale_b": scale_b, "zp_b": zp_b, "b_q": b_q,
             }
 
-            f32_bytes  = (len(flat_W) + len(b)) * 4
-            int8_bytes = len(W_q) + len(b_q) + 8  # + 2 floats for scales
+            f32_bytes         = (len(flat_W) + len(b)) * 4
+            int8_bytes        = len(W_q) + len(b_q) + 8
             total_bytes_f32  += f32_bytes
             total_bytes_int8 += int8_bytes
-
-            ratio = f32_bytes / max(int8_bytes, 1)
             print(f"  Layer {idx:2d} Dense({layer.in_features},{layer.units})"
                   f"  scale_W={scale_W:.6f}"
-                  f"  f32={f32_bytes/1024:.1f}KB → int8={int8_bytes/1024:.1f}KB"
-                  f"  ({ratio:.1f}x)")
+                  f"  {f32_bytes/1024:.1f}KB → {int8_bytes/1024:.1f}KB"
+                  f"  ({f32_bytes/max(int8_bytes,1):.1f}x)")
 
         elif isinstance(layer, BatchNormalization):
-            w = layer.get_weights()
-            quant_data[idx] = {"type": "BatchNorm", "weights": w,
+            quant_data[idx] = {"type": "BatchNorm",
+                               "weights": layer.get_weights(),
                                "features": layer.features}
 
         elif isinstance(layer, Dropout):
             quant_data[idx] = {"type": "Dropout", "rate": layer.rate}
 
-    print(f"\n  Total Dense weights: f32={total_bytes_f32/1024:.1f} KB"
+    print(f"\n  Total: f32={total_bytes_f32/1024:.1f} KB"
           f"  →  int8={total_bytes_int8/1024:.1f} KB"
           f"  ({total_bytes_f32/max(total_bytes_int8,1):.1f}x compression)")
-
     return quant_data
 
 
 # ============================================================================
-# BINARY SAVE  (pure struct — no pickle, no numpy, fully C-readable)
+# BINARY SAVE  (pure struct — no pickle, C-readable)
 # ============================================================================
-#
-# File format:
-#   Header:
-#     [u16] magic = 0xD1D5
-#     [i32] n_layers
-#
-#   Per layer:
-#     [u8]  layer_type  (0=Dense_quantized, 1=BatchNorm_f32, 2=Dropout)
-#
-#     type 0 — Dense INT8:
-#       [i32] in_features
-#       [i32] units
-#       [f32] scale_W
-#       [i8]  zp_W  (padded to 4 bytes: i8 + 3x pad)
-#       [i8 × in_features×units] W_q
-#       [f32] scale_b
-#       [i8]  zp_b  (padded to 4 bytes)
-#       [i8 × units] b_q
-#
-#     type 1 — BatchNorm float32:
-#       [i32] features
-#       [f32 × features] gamma
-#       [f32 × features] beta
-#       [f32 × features] running_mean
-#       [f32 × features] running_var
-#
-#     type 2 — Dropout:
-#       [f32] rate  (informational — not used at inference)
-#
-# ============================================================================
+# Header:  [u16 magic=0xD1D5][i32 n_layers]
+# Dense:   [u8=0][i32 in_f][i32 units][f32 scale_W][bxxx zp_W]
+#          [i8 × in_f*units W_q][f32 scale_b][bxxx zp_b][i8 × units b_q]
+# BN:      [u8=1][i32 features][f32×features gamma,beta,rmean,rvar]
+# Dropout: [u8=2][f32 rate]
 
 MAGIC = 0xD1D5
 
-def _pack_f32_array(values):
-    return struct.pack(f"{len(values)}f", *values)
+def _pack_f32(v):       return struct.pack("<f", v)
+def _pack_f32_arr(arr): return struct.pack(f"<{len(arr)}f", *arr)
+def _pack_i8_arr(arr):  return struct.pack(f"<{len(arr)}b", *arr)
 
-def _pack_i8_array(values):
-    return struct.pack(f"{len(values)}b", *values)
 
-def save_bin(quant_data: dict, path: str):
-    """Write quantized model to a pure binary .bin file."""
+def save_bin(quant_data: dict, path: str) -> float:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-
     with open(path, "wb") as f:
-        # Header
         f.write(struct.pack("<HI", MAGIC, len(quant_data)))
-
         for idx in sorted(quant_data.keys()):
             d = quant_data[idx]
-
             if d["type"] == "Dense":
-                f.write(struct.pack("<B", 0))                        # layer type
+                f.write(struct.pack("<B", 0))
                 f.write(struct.pack("<ii", d["in_features"], d["units"]))
-                f.write(struct.pack("<f", d["scale_W"]))
-                f.write(struct.pack("<bxxx", d["zp_W"]))             # zp + 3 pad bytes
-                f.write(_pack_i8_array(d["W_q"]))
-                f.write(struct.pack("<f", d["scale_b"]))
+                f.write(_pack_f32(d["scale_W"]))
+                f.write(struct.pack("<bxxx", d["zp_W"]))
+                f.write(_pack_i8_arr(d["W_q"]))
+                f.write(_pack_f32(d["scale_b"]))
                 f.write(struct.pack("<bxxx", d["zp_b"]))
-                f.write(_pack_i8_array(d["b_q"]))
-
+                f.write(_pack_i8_arr(d["b_q"]))
             elif d["type"] == "BatchNorm":
                 f.write(struct.pack("<B", 1))
                 f.write(struct.pack("<i", d["features"]))
-                for arr in d["weights"][:4]:                         # gamma,beta,rmean,rvar
-                    f.write(_pack_f32_array(arr))
-
+                for arr in d["weights"][:4]:
+                    f.write(_pack_f32_arr(arr))
             elif d["type"] == "Dropout":
                 f.write(struct.pack("<B", 2))
-                f.write(struct.pack("<f", d["rate"]))
-
+                f.write(_pack_f32(d["rate"]))
     size_kb = path.stat().st_size / 1024
     print(f"  INT8 .bin : {path}  ({size_kb:.2f} KB)")
     return size_kb
 
 
-def save_f32_bin(model: Sequential, path: str):
-    """
-    Save pruned float32 weights as a compact .bin (no pickle).
-    Format per Dense layer:
-      [u8=0][i32 in_f][i32 units][f32 × in_f*units W][f32 × units b]
-    BatchNorm:
-      [u8=1][i32 features][f32×4×features]
-    Dropout:
-      [u8=2][f32 rate]
-    Header: [u16 magic][i32 n_layers]
-    """
+def save_f32_bin(model: Sequential, path: str) -> float:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-
-    layers = model.layers
     with open(path, "wb") as f:
-        f.write(struct.pack("<HI", MAGIC, len(layers)))
-        for layer in layers:
+        f.write(struct.pack("<HI", MAGIC, len(model.layers)))
+        for layer in model.layers:
             if isinstance(layer, Dense):
                 flat_W, b = layer.get_weights()
                 f.write(struct.pack("<B", 0))
                 f.write(struct.pack("<ii", layer.in_features, layer.units))
-                f.write(_pack_f32_array(flat_W))
-                f.write(_pack_f32_array(b if b else []))
+                f.write(_pack_f32_arr(flat_W))
+                f.write(_pack_f32_arr(b if b else []))
             elif isinstance(layer, BatchNormalization):
-                w = layer.get_weights()
                 f.write(struct.pack("<B", 1))
                 f.write(struct.pack("<i", layer.features))
-                for arr in w[:4]:
-                    f.write(_pack_f32_array(arr))
+                for arr in layer.get_weights()[:4]:
+                    f.write(_pack_f32_arr(arr))
             elif isinstance(layer, Dropout):
                 f.write(struct.pack("<B", 2))
-                f.write(struct.pack("<f", layer.rate))
-
+                f.write(_pack_f32(layer.rate))
     size_kb = path.stat().st_size / 1024
     print(f"  f32 .bin  : {path}  ({size_kb:.2f} KB)")
     return size_kb
 
 
 def save_scaler_bin(scaler, path: str):
-    """Save RobustScaler median + IQR as float32 binary."""
-    path = Path(path)
+    path   = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     params = scaler.get_params()
     median = params["median"]
     iqr    = params["iqr"]
     with open(path, "wb") as f:
-        f.write(struct.pack("<I", len(median)))   # n_features
-        f.write(_pack_f32_array(median))
-        f.write(_pack_f32_array(iqr))
-    size_kb = path.stat().st_size / 1024
-    print(f"  scaler    : {path}  ({size_kb:.3f} KB)")
-    return size_kb
+        f.write(struct.pack("<I", len(median)))
+        f.write(_pack_f32_arr(median))
+        f.write(_pack_f32_arr(iqr))
+    print(f"  scaler    : {path}  ({path.stat().st_size / 1024:.3f} KB)")
 
 
 def save_threshold_bin(threshold: float, path: str):
-    """Save decision threshold as a single float32."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "wb") as f:
-        f.write(struct.pack("<f", threshold))
+        f.write(_pack_f32(threshold))
     print(f"  threshold : {threshold:.4f} → {path}  ({path.stat().st_size} bytes)")
 
 
 # ============================================================================
-# THRESHOLD SWEEP
+# THRESHOLD SWEEP  (robust to both dict and float return formats)
 # ============================================================================
 
 def find_threshold(model: Sequential, X_val: list, y_val: list,
                    config: Config) -> float:
     if not config.OPTIMIZE_THRESHOLD:
         return config.DECISION_THRESHOLD
+
     print("\n  Threshold sweep on validation set...")
     y_scores = model.predict(X_val)
     results  = threshold_sweep(y_val, y_scores,
                                thresholds=[i / 100 for i in range(10, 91)])
-    best_t, best_m = max(results, key=lambda r: r[1].get("f1", 0))
-    print(f"  Optimal threshold : {best_t:.2f}  "
-          f"(F1={best_m.get('f1',0):.4f}  "
-          f"P={best_m.get('precision',0):.4f}  "
-          f"R={best_m.get('recall',0):.4f})")
+
+    # threshold_sweep may return (t, float) or (t, dict) depending on version
+    def _f1(r):
+        m = r[1]
+        if isinstance(m, dict):
+            return m.get("f1", 0.0)
+        return float(m)  # assume the float IS the f1
+
+    best_t, best_m = max(results, key=_f1)
+
+    if isinstance(best_m, dict):
+        print(f"  Optimal threshold : {best_t:.2f}  "
+              f"(F1={best_m.get('f1',0):.4f}  "
+              f"P={best_m.get('precision',0):.4f}  "
+              f"R={best_m.get('recall',0):.4f})")
+    else:
+        print(f"  Optimal threshold : {best_t:.2f}  (F1={best_m:.4f})")
+
     return best_t
 
 
@@ -702,8 +646,8 @@ def evaluate(model: Sequential, X: list, y: list,
     auc  = roc_auc(y, y_scores)
     cm   = confusion_matrix(y, y_pred)
 
-    tn = cm.get("tn", 0); fp = cm.get("fp", 0)
-    fn = cm.get("fn", 0); tp = cm.get("tp", 0)
+    tn  = cm.get("tn", 0); fp = cm.get("fp", 0)
+    fn  = cm.get("fn", 0); tp = cm.get("tp", 0)
     fpr = fp / max(fp + tn, 1)
     fnr = fn / max(fn + tp, 1)
 
@@ -726,14 +670,14 @@ def evaluate(model: Sequential, X: list, y: list,
 
 def main():
     parser = argparse.ArgumentParser(description="iotids DNN baseline")
-    parser.add_argument("--data",        default=None, type=str)
-    parser.add_argument("--sample",      default=None, type=float)
-    parser.add_argument("--epochs",      default=None, type=int)
-    parser.add_argument("--batch",       default=None, type=int)
-    parser.add_argument("--no-compress", action="store_true",
-                        help="Skip pruning and quantization")
-    parser.add_argument("--sparsity",    default=None, type=float,
-                        help="Pruning sparsity override (e.g. 0.3)")
+    parser.add_argument("--data",        default=None,  type=str)
+    parser.add_argument("--sample",      default=None,  type=float)
+    parser.add_argument("--epochs",      default=None,  type=int)
+    parser.add_argument("--batch",       default=None,  type=int)
+    parser.add_argument("--no-compress", action="store_true")
+    parser.add_argument("--sparsity",    default=None,  type=float)
+    parser.add_argument("--pos-weight",  default=None,  type=float,
+                        help="Class weight for attack samples (default: auto)")
     args = parser.parse_args()
 
     set_seed(RANDOM_SEED)
@@ -742,25 +686,17 @@ def main():
     print("  DEEP NEURAL NETWORK BASELINE  —  iotids Library".center(80))
     print("  No TensorFlow · No scikit-learn · No pandas".center(80))
     print("=" * 80)
-
-    backend = os.environ.get("IOTIDS_BACKEND", "pure-python")
-    print(f"\n  Backend : {backend}")
+    print(f"\n  Backend : {os.environ.get('IOTIDS_BACKEND', 'numpy')}")
 
     config = Config()
-    if args.data:
-        config.DATA_FILE = Path(args.data)
-    if args.sample is not None:
-        config.USE_SAMPLE  = True
-        config.SAMPLE_FRAC = args.sample
-    if args.epochs is not None:
-        config.EPOCHS = args.epochs
-    if args.batch is not None:
-        config.BATCH_SIZE = args.batch
+    if args.data:        config.DATA_FILE    = Path(args.data)
+    if args.sample:      config.USE_SAMPLE   = True; config.SAMPLE_FRAC = args.sample
+    if args.epochs:      config.EPOCHS       = args.epochs
+    if args.batch:       config.BATCH_SIZE   = args.batch
     if args.no_compress:
-        config.ENABLE_PRUNING     = False
+        config.ENABLE_PRUNING      = False
         config.ENABLE_QUANTIZATION = False
-    if args.sparsity is not None:
-        config.PRUNE_SPARSITY = args.sparsity
+    if args.sparsity:    config.PRUNE_SPARSITY = args.sparsity
 
     config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -770,21 +706,27 @@ def main():
     X, y, feat_names = preprocess(data, config)
     splits           = split_and_scale(X, y, config)
 
-    # ── 2. Build + train ──────────────────────────────────────────────────────
-    model            = build_model(len(splits["X_train"][0]), config)
+    # ── 2. Compute pos_weight from training distribution ──────────────────────
+    n_benign   = sum(1 for v in splits["y_train"] if v == 0)
+    n_attack   = sum(1 for v in splits["y_train"] if v == 1)
+    pos_weight = args.pos_weight if args.pos_weight else n_benign / max(n_attack, 1)
+    print(f"\n  Class weight (pos_weight) : {pos_weight:.3f}x")
+
+    # ── 3. Build + train ──────────────────────────────────────────────────────
+    model            = build_model(len(splits["X_train"][0]), config, pos_weight)
     history, t_train = train(model, splits, config)
 
-    # ── 3. Evaluate pre-compression ───────────────────────────────────────────
+    # ── 4. Threshold + pre-compression eval ───────────────────────────────────
     threshold = find_threshold(model, splits["X_val"], splits["y_val"], config)
 
     print("\n" + "=" * 80)
     print("EVALUATION  (pre-compression)")
     print("=" * 80)
     evaluate(model, splits["X_train"], splits["y_train"], threshold, "Train")
-    m_val  = evaluate(model, splits["X_val"],   splits["y_val"],   threshold, "Validation")
-    m_pre  = evaluate(model, splits["X_test"],  splits["y_test"],  threshold, "Test")
+    evaluate(model, splits["X_val"],   splits["y_val"],   threshold, "Validation")
+    m_pre = evaluate(model, splits["X_test"], splits["y_test"], threshold, "Test")
 
-    # ── 4. Pruning ────────────────────────────────────────────────────────────
+    # ── 5. Pruning ────────────────────────────────────────────────────────────
     sparsity = 0.0
     if config.ENABLE_PRUNING:
         sparsity  = prune_model(model, splits, config)
@@ -795,30 +737,27 @@ def main():
         print("=" * 80)
         evaluate(model, splits["X_train"], splits["y_train"], threshold, "Train")
         evaluate(model, splits["X_val"],   splits["y_val"],   threshold, "Validation")
-        m_post = evaluate(model, splits["X_test"],  splits["y_test"],  threshold, "Test")
-        acc_drop = m_pre["accuracy"] - m_post["accuracy"]
+        m_post    = evaluate(model, splits["X_test"], splits["y_test"], threshold, "Test")
+        acc_drop  = m_pre["accuracy"] - m_post["accuracy"]
         print(f"\n  Accuracy drop from pruning : {acc_drop*100:.3f}%")
 
-    # ── 5. Save float32 .bin (always — C runtime fallback) ───────────────────
+    # ── 6. Save float32 .bin ──────────────────────────────────────────────────
     print("\n" + "=" * 80)
     print("SAVING ARTIFACTS")
     print("=" * 80)
-
-    f32_path = config.MODEL_DIR / "iotids_dnn_f32.bin"
-    save_f32_bin(model, str(f32_path))
+    save_f32_bin(model,          str(config.MODEL_DIR / "iotids_dnn_f32.bin"))
     save_scaler_bin(splits["scaler"], str(config.MODEL_DIR / "iotids_dnn_scaler.bin"))
-    save_threshold_bin(threshold,     str(config.MODEL_DIR / "iotids_dnn_threshold.bin"))
+    save_threshold_bin(threshold, str(config.MODEL_DIR / "iotids_dnn_threshold.bin"))
 
-    # ── 6. INT8 quantization + save ──────────────────────────────────────────
+    # ── 7. INT8 quantization + save ──────────────────────────────────────────
     int8_kb = None
     if config.ENABLE_QUANTIZATION:
         quant_data = quantize_model(model)
-        int8_path  = config.MODEL_DIR / "iotids_dnn.bin"
-        int8_kb    = save_bin(quant_data, str(int8_path))
+        int8_kb    = save_bin(quant_data, str(config.MODEL_DIR / "iotids_dnn.bin"))
 
-    # ── 7. Final summary ──────────────────────────────────────────────────────
-    # Re-evaluate using the final threshold (post pruning if pruning was applied)
-    m_test = evaluate(model, splits["X_test"], splits["y_test"], threshold, "Final Test")
+    # ── 8. Final evaluation ───────────────────────────────────────────────────
+    m_test = evaluate(model, splits["X_test"], splits["y_test"],
+                      threshold, "Final Test")
 
     print("\n" + "=" * 80)
     print("  RESULTS SUMMARY".center(80))
@@ -832,13 +771,13 @@ def main():
     print(f"  FNR            : {m_test['fnr']:.4f}  ({m_test['fnr']*100:.4f}%)")
     print(f"  Training time  : {t_train:.1f}s  ({t_train/60:.1f} min)")
     print(f"  Threshold used : {threshold:.2f}")
+    print(f"  pos_weight     : {pos_weight:.3f}x")
     print(f"  Pruning        : {'OFF' if not config.ENABLE_PRUNING else f'{sparsity*100:.1f}% sparsity'}")
     if int8_kb:
         print(f"  INT8 .bin size : {int8_kb:.2f} KB"
               f"  ({'PASS' if int8_kb <= 30 else 'WARN: exceeds 30KB Pico budget'})")
     print(f"\n  Prior DNN baseline : 99.42%")
-    status = ("PASS" if m_test["accuracy"] >= 0.97 else "WARN — below 97%")
-    print(f"  Status             : {status}")
+    print(f"  Status             : {'PASS' if m_test['accuracy'] >= 0.97 else 'WARN — below 97%'}")
     print("\n" + "=" * 80 + "\n")
 
 
