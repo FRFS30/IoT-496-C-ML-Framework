@@ -3,44 +3,17 @@ iotids.boosting.tree
 ====================
 A single regression tree fit on XGBoost-style second-order gradients.
 
-Pure Python — zero third-party imports.  Uses only multiprocessing from
-the standard library for parallelism.
+Speedup strategy: pre-sorted column indices
+-------------------------------------------
+The previous implementation sorted each feature column at every node:
+O(n log n) per feature per node with a Python lambda called n times.
+With 222K samples and 24 features this was ~30 seconds per tree.
 
-Why the previous parallel implementation was still slow
--------------------------------------------------------
-pool.map() pickles every task argument and sends it through an OS pipe.
-With 198K-sample nodes, each task contained:
-  sorted_idx  : 198K ints   ≈ 1.6 MB
-  feat_vals   : 198K floats ≈ 1.6 MB
-  gradients   : 198K floats ≈ 1.6 MB
-  hessians    : 198K floats ≈ 1.6 MB
-  Total       : ~6.4 MB per feature × 24 features = 154 MB of pipe I/O
-  per node — serialized by the main process before any worker starts.
-  The pickling cost dominated the compute, keeping CPU at ~5%.
+This implementation pre-sorts ALL feature columns ONCE before building
+the tree, then at each node filters the pre-sorted order to active rows
+in O(n_active) using a Python set for O(1) membership checks.
 
-The correct pattern: shared module globals + fork inheritance
-------------------------------------------------------------
-On Linux, multiprocessing.get_context("fork") creates worker processes
-by forking the parent.  Forked workers inherit the parent's entire
-address space via copy-on-write — they can read X, gradients, hessians
-directly from memory at zero cost, without any serialization.
-
-The key is to store the data in a module-level global BEFORE creating
-the pool, then only send tiny descriptors through the pipe:
-
-    Task = (feature_index,)     # 44 bytes instead of 6.4 MB
-
-Each worker reads X/g/h from the inherited global, sorts its assigned
-feature column, scans thresholds, and returns a 4-tuple of scalars.
-Zero data copying.  Zero pickling of arrays.
-
-This is the standard pattern for CPU-bound parallel Python on Linux HPC
-systems (exactly what CSE 19 is).
-
-Pool lifetime
--------------
-The pool is created once per tree.fit() call and reused across all
-node builds in that tree.  Fork overhead is paid once, not once per node.
+No sorting happens inside the workers -- only linear scans.
 """
 
 from __future__ import annotations
@@ -48,59 +21,39 @@ from __future__ import annotations
 import math
 import multiprocessing
 import os
-from typing import List, Optional, Tuple
+from typing import FrozenSet, List, Optional, Tuple
 
 from .node import Node
 
 
 # ---------------------------------------------------------------------------
-# Module-level shared state
-# Populated by BoostingTree.fit() BEFORE the pool is forked.
-# Workers access these directly from inherited memory — no serialization.
+# Module-level shared state -- populated BEFORE pool is forked
 # ---------------------------------------------------------------------------
 
-_SHARED_X:          List[List[float]] = []
-_SHARED_G:          List[float]       = []
-_SHARED_H:          List[float]       = []
-_SHARED_INDICES:    List[int]         = []
-_SHARED_G_TOTAL:    float             = 0.0
-_SHARED_H_TOTAL:    float             = 0.0
-_SHARED_REG_LAMBDA: float             = 1.0
-_SHARED_MCW:        float             = 1.0
-_SHARED_MIN_GAIN:   float             = 0.0
+_SORTED_COLS: List[List[int]]   = []   # [feat] -> row indices sorted by X[:,feat]
+_SHARED_G:    List[float]       = []
+_SHARED_H:    List[float]       = []
+_FEAT_VALS:   List[List[float]] = []   # [feat][row] = value (column-major cache)
 
 
 # ---------------------------------------------------------------------------
-# Worker function — module-level so it's picklable
-# Receives ONLY a feature index.  Everything else comes from inherited globals.
+# Worker -- O(n_active) linear scan, no sort
 # ---------------------------------------------------------------------------
 
 def _scan_feature_global(args):
-    """
-    Find the best split threshold for one feature.
+    feat, active_set, G_total, H_total, lam, mcw, mg = args
 
-    Called in a worker process.
-    - X, g, h are read from module globals inherited at fork — zero IPC cost.
-    - indices, G_total, H_total, and hyperparams are sent per-task because
-      they change for every node.  They are small (indices ~ node_size ints,
-      scalars ~ negligible) compared to X/g/h (n_train × n_features floats).
+    sorted_all = _SORTED_COLS[feat]
+    feat_vals  = _FEAT_VALS[feat]
+    g          = _SHARED_G
+    h          = _SHARED_H
 
-    Parameters
-    ----------
-    args : (feat, indices, G_total, H_total, reg_lambda, mcw, mg)
-
-    Returns
-    -------
-    (gain, feat, threshold, left_count)
-    """
-    feat, indices, G_total, H_total, lam, mcw, mg = args
-    X       = _SHARED_X
-    g       = _SHARED_G
-    h       = _SHARED_H
-
-    # Sort samples by this feature's value — O(n log n)
-    sorted_idx = sorted(indices, key=lambda i: X[i][feat])
+    # Filter global pre-sorted order to active rows -- O(n_active)
+    sorted_idx = [i for i in sorted_all if i in active_set]
     n = len(sorted_idx)
+
+    if n < 2:
+        return -math.inf, feat, 0.0, -1
 
     best_gain   = -math.inf
     best_thresh = 0.0
@@ -112,20 +65,20 @@ def _scan_feature_global(args):
         i    = sorted_idx[k]
         G_L += g[i]
         H_L += h[i]
-        G_R  = G_total - G_L
         H_R  = H_total - H_L
 
         if H_L < mcw or H_R < mcw:
             continue
 
-        v_k  = X[sorted_idx[k]][feat]
-        v_k1 = X[sorted_idx[k + 1]][feat]
+        v_k  = feat_vals[sorted_idx[k]]
+        v_k1 = feat_vals[sorted_idx[k + 1]]
         if v_k == v_k1:
             continue
 
-        d   = H_total + lam
-        dL  = H_L     + lam
-        dR  = H_R     + lam
+        G_R  = G_total - G_L
+        d    = H_total + lam
+        dL   = H_L     + lam
+        dR   = H_R     + lam
         gain = 0.5 * (
             G_L * G_L / dL +
             G_R * G_R / dR -
@@ -145,19 +98,6 @@ def _scan_feature_global(args):
 # ---------------------------------------------------------------------------
 
 class BoostingTree:
-    """
-    A single gradient-boosted regression tree.
-
-    Parameters
-    ----------
-    max_depth        : int   – maximum tree depth
-    min_child_weight : float – minimum hessian sum in a child node
-    reg_lambda       : float – L2 regularization on leaf weights
-    min_gain         : float – minimum gain to accept a split (gamma)
-    n_jobs           : int   – worker processes for feature scan
-                               -1 = all cores, 1 = serial (for debugging)
-    """
-
     def __init__(
         self,
         max_depth: int = 6,
@@ -182,101 +122,71 @@ class BoostingTree:
         self._is_fit:     bool       = False
         self._pool:       Optional[multiprocessing.pool.Pool] = None
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _resolve_workers(n_jobs: int, n_features: int) -> int:
         if n_jobs == 1:
             return 1
         cpu_count = os.cpu_count() or 1
         workers   = cpu_count if n_jobs == -1 else max(1, n_jobs)
-        # No point having more workers than features to scan
         return min(workers, max(1, n_features))
 
     def _leaf_weight(self, G: float, H: float) -> float:
         return -G / (H + self.reg_lambda)
 
-    # ------------------------------------------------------------------
-    # Best split — each feature dispatched to an inherited-memory worker
-    # ------------------------------------------------------------------
-
     def _best_split(
         self,
-        X: List[List[float]],
-        gradients: List[float],
-        hessians: List[float],
         indices: List[int],
         feature_cols: List[int],
+        G_total: float,
+        H_total: float,
     ) -> Tuple[int, float, float, List[int], List[int]]:
         n = len(indices)
-        if n == 0:
+        if n < 2:
             return -1, 0.0, -math.inf, [], []
 
-        G_total = sum(gradients[i] for i in indices)
-        H_total = sum(hessians[i]  for i in indices)
+        active_set = frozenset(indices)
+        lam = self.reg_lambda
+        mcw = self.min_child_weight
+        mg  = self.min_gain
 
-        # ── Dispatch ──────────────────────────────────────────────────────
-        # Task tuple: (feat, indices, G_total, H_total, lam, mcw, mg)
-        # X/g/h are NOT in the tuple — workers read them from inherited globals.
-        # indices is the only array here; at depth d it has n/2^d entries,
-        # so it shrinks rapidly down the tree.  Root = n ints, depth-3 = n/8.
         tasks = [
-            (feat, indices, G_total, H_total,
-             self.reg_lambda, self.min_child_weight, self.min_gain)
+            (feat, active_set, G_total, H_total, lam, mcw, mg)
             for feat in feature_cols
         ]
 
-        if self._pool is not None and len(tasks) > 1:
+        if self._pool is not None:
             results = self._pool.map(_scan_feature_global, tasks)
         else:
             results = [_scan_feature_global(t) for t in tasks]
 
-        # ── Pick the best result across features ──────────────────────────
-        best_gain   = -math.inf
-        best_feat   = -1
-        best_thresh = 0.0
-        best_left_k = -1
-
-        for gain, feat, thresh, left_k in results:
-            if gain > best_gain:
-                best_gain   = gain
-                best_feat   = feat
-                best_thresh = thresh
-                best_left_k = left_k
+        best_gain, best_feat, best_thresh, best_left_k = max(
+            results, key=lambda r: r[0]
+        )
 
         if best_feat == -1 or best_gain <= 0.0 or best_left_k < 0:
             return -1, 0.0, -math.inf, [], []
 
-        # Reconstruct left/right index lists from the winning feature sort
-        # We need to re-sort once for the winner — cheaper than keeping all
-        # 24 sorted lists in memory simultaneously.
-        sorted_winner = sorted(indices, key=lambda i: X[i][best_feat])
+        sorted_winner = [i for i in _SORTED_COLS[best_feat] if i in active_set]
         left_idx  = sorted_winner[: best_left_k + 1]
         right_idx = sorted_winner[best_left_k + 1 :]
 
         return best_feat, best_thresh, best_gain, left_idx, right_idx
 
-    # ------------------------------------------------------------------
-    # Recursive tree builder
-    # ------------------------------------------------------------------
-
     def _build(
         self,
-        X: List[List[float]],
-        gradients: List[float],
-        hessians: List[float],
         indices: List[int],
         feature_cols: List[int],
         node_idx: int,
         depth: int,
     ) -> None:
+        g = _SHARED_G
+        h = _SHARED_H
+
         while len(self._nodes) <= node_idx:
             self._nodes.append(Node.make_empty())
 
-        G = sum(gradients[i] for i in indices)
-        H = sum(hessians[i]  for i in indices)
+        G = sum(g[i] for i in indices)
+        H = sum(h[i] for i in indices)
         n = len(indices)
 
         if depth >= self.max_depth or n == 0:
@@ -286,7 +196,7 @@ class BoostingTree:
             return
 
         best_feat, best_thresh, best_gain, left_idx, right_idx = self._best_split(
-            X, gradients, hessians, indices, feature_cols
+            indices, feature_cols, G, H
         )
 
         if best_feat == -1 or best_gain <= 0.0:
@@ -303,12 +213,8 @@ class BoostingTree:
             sum_hessian=H,
         )
 
-        self._build(X, gradients, hessians, left_idx,  feature_cols, 2*node_idx+1, depth+1)
-        self._build(X, gradients, hessians, right_idx, feature_cols, 2*node_idx+2, depth+1)
-
-    # ------------------------------------------------------------------
-    # Public: fit
-    # ------------------------------------------------------------------
+        self._build(left_idx,  feature_cols, 2*node_idx+1, depth+1)
+        self._build(right_idx, feature_cols, 2*node_idx+2, depth+1)
 
     def fit(
         self,
@@ -317,13 +223,6 @@ class BoostingTree:
         hessians: List[float],
         feature_cols: Optional[List[int]] = None,
     ) -> "BoostingTree":
-        """
-        Fit this tree on gradient/hessian residuals.
-
-        Populates module globals with X/g/h BEFORE forking the pool so
-        workers inherit the data at zero copy cost.  The pool is created
-        once and shared across all nodes in this tree.
-        """
         n_samples = len(X)
         if n_samples == 0:
             raise ValueError("fit() received empty dataset")
@@ -339,25 +238,28 @@ class BoostingTree:
 
         n_workers = self._resolve_workers(self.n_jobs, len(feature_cols))
 
-        # ── Populate globals BEFORE fork so workers inherit them ──────────
-        global _SHARED_X, _SHARED_G, _SHARED_H
-        _SHARED_X = X
+        # Pre-sort all feature columns once (replaces per-node O(n log n) sorts)
+        global _SORTED_COLS, _SHARED_G, _SHARED_H, _FEAT_VALS
+
+        # Build column-major value cache for fast worker access
+        _FEAT_VALS = [[X[i][f] for i in range(n_samples)] for f in range(self._n_features)]
+        # Sort each feature column once
+        _SORTED_COLS = [
+            sorted(range(n_samples), key=lambda i, f=f: _FEAT_VALS[f][i])
+            for f in range(self._n_features)
+        ]
         _SHARED_G = gradients
         _SHARED_H = hessians
 
         self._nodes = []
         try:
             if n_workers > 1:
-                # fork() on Linux: workers get a copy-on-write snapshot of
-                # the parent process, including _SHARED_X/G/H above.
-                # They never need to receive this data through the pipe.
                 ctx = multiprocessing.get_context("fork")
                 self._pool = ctx.Pool(processes=n_workers)
             else:
                 self._pool = None
 
             self._build(
-                X, gradients, hessians,
                 list(range(n_samples)),
                 feature_cols,
                 node_idx=0,
@@ -371,10 +273,6 @@ class BoostingTree:
 
         self._is_fit = True
         return self
-
-    # ------------------------------------------------------------------
-    # Public: predict
-    # ------------------------------------------------------------------
 
     def predict_one(self, x: List[float]) -> float:
         if not self._is_fit:
@@ -390,10 +288,6 @@ class BoostingTree:
 
     def predict(self, X: List[List[float]]) -> List[float]:
         return [self.predict_one(x) for x in X]
-
-    # ------------------------------------------------------------------
-    # FedAvg interface
-    # ------------------------------------------------------------------
 
     def get_leaves(self) -> List[float]:
         if not self._is_fit:
@@ -413,10 +307,6 @@ class BoostingTree:
                 node.leaf_value = float(values[vi])
                 vi += 1
 
-    # ------------------------------------------------------------------
-    # Diagnostics / serialization
-    # ------------------------------------------------------------------
-
     def n_leaves(self) -> int:
         return sum(1 for n in self._nodes if n.is_leaf)
 
@@ -426,11 +316,13 @@ class BoostingTree:
     def depth(self) -> int:
         if not self._nodes:
             return 0
+        if not any(node.is_split() for node in self._nodes):
+            return 0
         return max(
             int(math.floor(math.log2(i + 1)))
             for i, node in enumerate(self._nodes)
             if node.is_split()
-        ) if any(node.is_split() for node in self._nodes) else 0
+        )
 
     def feature_gains(self, n_features: Optional[int] = None) -> List[float]:
         nf = n_features if n_features is not None else self._n_features
