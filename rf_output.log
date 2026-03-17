@@ -27,9 +27,9 @@ LOADING CIC-IDS-2017 DATASET
   Samples: 283,073  |  Benign: 227,309  |  Attack: 55,764
   Train: 198,153  Val: 28,307  Test: 56,613
 
---- Training (n_estimators=20, max_depth=8) ---
-  Parallel training: 20 trees across 20/20 cores...
-  Done in 20.17s
+--- Training (n_estimators=10, max_depth=10) ---
+  Parallel training: 10 trees across 20/20 cores...
+  Done in 14.54s
 
 --- Evaluating TRAIN ---
 
@@ -37,7 +37,7 @@ LOADING CIC-IDS-2017 DATASET
 
 --- Evaluating TEST ---
 
-  [Repeat 1] Acc=97.97%  Prec=0.9189  Rec=0.9838  F1=0.9502  AUC=0.9983  FPR=0.0213  FNR=0.0162  Time=20.2s
+  [Repeat 1] Acc=98.50%  Prec=0.9407  Rec=0.9857  F1=0.9627  AUC=0.9989  FPR=0.0152  FNR=0.0143  Time=14.5s
 
   Model  saved: models/iotids_rf/iotids_rf_model_repeat1.bin
   Scaler saved: models/iotids_rf/iotids_rf_scaler_repeat1.bin
@@ -53,9 +53,9 @@ LOADING CIC-IDS-2017 DATASET
   Samples: 283,073  |  Benign: 227,309  |  Attack: 55,764
   Train: 198,153  Val: 28,307  Test: 56,613
 
---- Training (n_estimators=20, max_depth=8) ---
-  Parallel training: 20 trees across 20/20 cores...
-  Done in 20.62s
+--- Training (n_estimators=10, max_depth=10) ---
+  Parallel training: 10 trees across 20/20 cores...
+  Done in 14.44s
 
 --- Evaluating TRAIN ---
 
@@ -63,7 +63,7 @@ LOADING CIC-IDS-2017 DATASET
 
 --- Evaluating TEST ---
 
-  [Repeat 2] Acc=98.19%  Prec=0.9291  Rec=0.9833  F1=0.9554  AUC=0.9982  FPR=0.0184  FNR=0.0167  Time=20.6s
+  [Repeat 2] Acc=98.84%  Prec=0.9585  Rec=0.9836  F1=0.9709  AUC=0.9987  FPR=0.0104  FNR=0.0164  Time=14.4s
 
   Model  saved: models/iotids_rf/iotids_rf_model_repeat2.bin
   Scaler saved: models/iotids_rf/iotids_rf_scaler_repeat2.bin
@@ -79,9 +79,9 @@ LOADING CIC-IDS-2017 DATASET
   Samples: 283,073  |  Benign: 227,309  |  Attack: 55,764
   Train: 198,153  Val: 28,307  Test: 56,613
 
---- Training (n_estimators=20, max_depth=8) ---
-  Parallel training: 20 trees across 20/20 cores...
-  Done in 26.33s
+--- Training (n_estimators=10, max_depth=10) ---
+  Parallel training: 10 trees across 20/20 cores...
+  Done in 16.59s
 
 --- Evaluating TRAIN ---
 
@@ -89,7 +89,7 @@ LOADING CIC-IDS-2017 DATASET
 
 --- Evaluating TEST ---
 
-  [Repeat 3] Acc=98.09%  Prec=0.9258  Rec=0.9818  F1=0.9530  AUC=0.9981  FPR=0.0193  FNR=0.0182  Time=26.3s
+  [Repeat 3] Acc=99.14%  Prec=0.9688  Rec=0.9881  F1=0.9783  AUC=0.9991  FPR=0.0078  FNR=0.0119  Time=16.6s
 
   Model  saved: models/iotids_rf/iotids_rf_model_repeat3.bin
   Scaler saved: models/iotids_rf/iotids_rf_scaler_repeat3.bin
@@ -105,9 +105,9 @@ LOADING CIC-IDS-2017 DATASET
   Samples: 283,073  |  Benign: 227,309  |  Attack: 55,764
   Train: 198,153  Val: 28,307  Test: 56,613
 
---- Training (n_estimators=20, max_depth=8) ---
-  Parallel training: 20 trees across 20/20 cores...
-  Done in 25.58s
+--- Training (n_estimators=10, max_depth=10) ---
+  Parallel training: 10 trees across 20/20 cores...
+  Done in 15.73s
 
 --- Evaluating TRAIN ---
 
@@ -115,7 +115,7 @@ LOADING CIC-IDS-2017 DATASET
 
 --- Evaluating TEST ---
 
-  [Repeat 4] Acc=98.10%  Prec=0.9268  Rec=0.9808  F1=0.9530  AUC=0.9982  FPR=0.0190  FNR=0.0192  Time=25.6s
+  [Repeat 4] Acc=98.90%  Prec=0.9617  Rec=0.9836  F1=0.9725  AUC=0.9993  FPR=0.0096  FNR=0.0164  Time=15.7s
 
   Model  saved: models/iotids_rf/iotids_rf_model_repeat4.bin
   Scaler saved: models/iotids_rf/iotids_rf_scaler_repeat4.bin
@@ -131,9 +131,9 @@ LOADING CIC-IDS-2017 DATASET
   Samples: 283,073  |  Benign: 227,309  |  Attack: 55,764
   Train: 198,153  Val: 28,307  Test: 56,613
 
---- Training (n_estimators=20, max_depth=8) ---
-  Parallel training: 20 trees across 20/20 cores...
-  Done in 23.84s
+--- Training (n_estimators=10, max_depth=10) ---
+  Parallel training: 10 trees across 20/20 cores...
+  Done in 16.35s
 
 --- Evaluating TRAIN ---
 
@@ -141,7 +141,7 @@ LOADING CIC-IDS-2017 DATASET
 
 --- Evaluating TEST ---
 
-  [Repeat 5] Acc=97.18%  Prec=0.8850  Rec=0.9847  F1=0.9322  AUC=0.9978  FPR=0.0314  FNR=0.0153  Time=23.8s
+  [Repeat 5] Acc=98.33%  Prec=0.9328  Rec=0.9864  F1=0.9588  AUC=0.9991  FPR=0.0174  FNR=0.0136  Time=16.4s
 
   Model  saved: models/iotids_rf/iotids_rf_model_repeat5.bin
   Scaler saved: models/iotids_rf/iotids_rf_scaler_repeat5.bin
@@ -154,18 +154,18 @@ LOADING CIC-IDS-2017 DATASET
 
   Metric               Mean       ±Std  Runs
   ------------------------------------------------------------
-  accuracy           0.9791     0.0041  [0.9797  0.9819  0.9809  0.9810  0.9718]
-  precision          0.9171     0.0183  [0.9189  0.9291  0.9258  0.9268  0.8850]
-  recall             0.9829     0.0016  [0.9838  0.9833  0.9818  0.9808  0.9847]
-  f1                 0.9488     0.0095  [0.9502  0.9554  0.9530  0.9530  0.9322]
-  auc                0.9981     0.0002  [0.9983  0.9982  0.9981  0.9982  0.9978]
-  fpr                0.0219     0.0054  [0.0213  0.0184  0.0193  0.0190  0.0314]
-  fnr                0.0171     0.0016  [0.0162  0.0167  0.0182  0.0192  0.0153]
+  accuracy           0.9874     0.0033  [0.9850  0.9884  0.9914  0.9890  0.9833]
+  precision          0.9525     0.0151  [0.9407  0.9585  0.9688  0.9617  0.9328]
+  recall             0.9855     0.0019  [0.9857  0.9836  0.9881  0.9836  0.9864]
+  f1                 0.9686     0.0078  [0.9627  0.9709  0.9783  0.9725  0.9588]
+  auc                0.9990     0.0002  [0.9989  0.9987  0.9991  0.9993  0.9991]
+  fpr                0.0121     0.0041  [0.0152  0.0104  0.0078  0.0096  0.0174]
+  fnr                0.0145     0.0019  [0.0143  0.0164  0.0119  0.0164  0.0136]
 
-  Train time          23.31s      2.81s
+  Train time          15.53s      1.00s
 
   Varun (2025) baseline : 99.2%
-  iotids best result    : 98.19%
+  iotids best result    : 99.14%
 
   Status: PASS — ready for federated learning
 
