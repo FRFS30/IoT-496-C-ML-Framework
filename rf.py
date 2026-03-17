@@ -63,8 +63,10 @@ class Config:
     REPEATS        = 1          # number of independent sample+train+eval runs
 
     # Model hyperparameters
+    # MAX_DEPTH=8 targets ~30 KB model size (vs 120 KB at depth 12)
+    # Expected accuracy impact: ~97-99% (vs 99.36% at depth 12)
     N_ESTIMATORS       = 20
-    MAX_DEPTH          = 12
+    MAX_DEPTH          = 8
     MIN_SAMPLES_SPLIT  = 50
     MIN_SAMPLES_LEAF   = 20
     MAX_FEATURES       = "sqrt"
