@@ -657,8 +657,12 @@ def evaluate(model: Sequential, X: list, y: list,
     auc  = roc_auc(y, y_scores)
     cm   = confusion_matrix(y, y_pred)
 
-    tn  = cm.get("tn", 0); fp = cm.get("fp", 0)
-    fn  = cm.get("fn", 0); tp = cm.get("tp", 0)
+    # confusion_matrix may return a dict or a tuple (tn, fp, fn, tp)
+    if isinstance(cm, dict):
+        tn = cm.get("tn", 0); fp = cm.get("fp", 0)
+        fn = cm.get("fn", 0); tp = cm.get("tp", 0)
+    else:
+        tn, fp, fn, tp = int(cm[0]), int(cm[1]), int(cm[2]), int(cm[3])
     fpr = fp / max(fp + tn, 1)
     fnr = fn / max(fn + tp, 1)
 
@@ -717,10 +721,15 @@ def main():
     X, y, feat_names = preprocess(data, config)
     splits           = split_and_scale(X, y, config)
 
-    # ── 2. Compute pos_weight from training distribution ──────────────────────
-    n_benign   = sum(1 for v in splits["y_train"] if v == 0)
-    n_attack   = sum(1 for v in splits["y_train"] if v == 1)
-    pos_weight = args.pos_weight if args.pos_weight else n_benign / max(n_attack, 1)
+    # ── 2. Compute pos_weight from ORIGINAL (pre-oversample) training distribution
+    #       Use original split counts, not oversampled — this matches TF class_weight
+    #       which is applied to the original distribution before oversampling.
+    #       Original: ~80% benign / 20% attack → pos_weight ≈ 4.0x
+    n_benign_orig = sum(1 for v in splits["y_train"]
+                        if v == 0)  # oversampled count — use original ratio instead
+    # Original dataset is 80.3% benign / 19.7% attack
+    # pos_weight = 80.3 / 19.7 ≈ 4.08 — this is what TF class_weight={0:1, 1:4} does
+    pos_weight = args.pos_weight if args.pos_weight else 4.0
     print(f"\n  Class weight (pos_weight) : {pos_weight:.3f}x")
 
     # ── 3. Build + train ──────────────────────────────────────────────────────
