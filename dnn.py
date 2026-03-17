@@ -104,7 +104,7 @@ class Config:
     DROPOUT_RATES = [0.4,  0.4,  0.3]
 
     # Loss
-    USE_FOCAL_LOSS = True
+    USE_FOCAL_LOSS = False
     FOCAL_ALPHA    = 0.70
     FOCAL_GAMMA    = 1.8
 
