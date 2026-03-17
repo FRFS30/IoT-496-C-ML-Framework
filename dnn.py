@@ -127,10 +127,10 @@ class Config:
     VAL_SIZE     = 0.15
 
     # Training
-    EPOCHS        = 40
+    EPOCHS        = 60
     BATCH_SIZE    = 4096
-    LEARNING_RATE = 2e-4
-    PATIENCE      = 7
+    LEARNING_RATE = 1e-4
+    PATIENCE      = 10
 
     # Architecture
     HIDDEN_UNITS  = [256, 128, 64]
@@ -596,11 +596,16 @@ def save_threshold_bin(threshold: float, path: str):
 
 
 # ============================================================================
-# THRESHOLD SWEEP  (robust to both dict and float return formats)
+# THRESHOLD SWEEP
 # ============================================================================
 
 def find_threshold(model: Sequential, X_val: list, y_val: list,
                    config: Config) -> float:
+    """
+    threshold_sweep returns a list of dicts, each with keys:
+      "threshold", "accuracy", "precision", "recall", "f1"
+    e.g. [{"threshold": 0.10, "f1": 0.85, ...}, ...]
+    """
     if not config.OPTIMIZE_THRESHOLD:
         return config.DECISION_THRESHOLD
 
@@ -609,35 +614,14 @@ def find_threshold(model: Sequential, X_val: list, y_val: list,
     results  = threshold_sweep(y_val, y_scores,
                                thresholds=[i / 100 for i in range(10, 91)])
 
-    # threshold_sweep return format varies by library version — handle all cases:
-    #   (threshold, f1_float)
-    #   (threshold, metrics_dict)
-    #   (threshold, acc, prec, rec, f1, ...)
-    def _f1(r):
-        m = r[1]
-        if isinstance(m, dict):
-            return m.get("f1", 0.0)
-        if isinstance(m, float):
-            return m
-        # tuple/list of metrics — try common positions
-        try:
-            return float(m)
-        except (TypeError, ValueError):
-            return 0.0
+    best   = max(results, key=lambda r: r["f1"])
+    best_t = best["threshold"]
 
-    best   = max(results, key=_f1)
-    best_t = best[0]
-    best_m = best[1]
-
-    if isinstance(best_m, dict):
-        print(f"  Optimal threshold : {best_t:.2f}  "
-              f"(F1={best_m.get('f1',0):.4f}  "
-              f"P={best_m.get('precision',0):.4f}  "
-              f"R={best_m.get('recall',0):.4f})")
-    else:
-        print(f"  Optimal threshold : {best_t:.2f}  (F1={best_m:.4f})")
-
-    return best_t
+    print(f"  Optimal threshold : {best_t:.2f}  "
+          f"(F1={best['f1']:.4f}  "
+          f"P={best['precision']:.4f}  "
+          f"R={best['recall']:.4f})")
+    return float(best_t)
 
 
 # ============================================================================
@@ -646,6 +630,10 @@ def find_threshold(model: Sequential, X_val: list, y_val: list,
 
 def evaluate(model: Sequential, X: list, y: list,
              threshold: float, label: str) -> dict:
+    """
+    confusion_matrix returns a numpy 2D array.
+    tn, fp, fn, tp = cm.ravel()  unpacks it correctly.
+    """
     print(f"\n  [{label}]")
     y_scores = model.predict(X)
     y_pred   = [1 if s >= threshold else 0 for s in y_scores]
@@ -656,13 +644,9 @@ def evaluate(model: Sequential, X: list, y: list,
     f1   = f1_score(y, y_pred)
     auc  = roc_auc(y, y_scores)
     cm   = confusion_matrix(y, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    tn = int(tn); fp = int(fp); fn = int(fn); tp = int(tp)
 
-    # confusion_matrix may return a dict or a tuple (tn, fp, fn, tp)
-    if isinstance(cm, dict):
-        tn = cm.get("tn", 0); fp = cm.get("fp", 0)
-        fn = cm.get("fn", 0); tp = cm.get("tp", 0)
-    else:
-        tn, fp, fn, tp = int(cm[0]), int(cm[1]), int(cm[2]), int(cm[3])
     fpr = fp / max(fp + tn, 1)
     fnr = fn / max(fn + tp, 1)
 
@@ -721,15 +705,12 @@ def main():
     X, y, feat_names = preprocess(data, config)
     splits           = split_and_scale(X, y, config)
 
-    # ── 2. Compute pos_weight from ORIGINAL (pre-oversample) training distribution
-    #       Use original split counts, not oversampled — this matches TF class_weight
-    #       which is applied to the original distribution before oversampling.
-    #       Original: ~80% benign / 20% attack → pos_weight ≈ 4.0x
-    n_benign_orig = sum(1 for v in splits["y_train"]
-                        if v == 0)  # oversampled count — use original ratio instead
-    # Original dataset is 80.3% benign / 19.7% attack
-    # pos_weight = 80.3 / 19.7 ≈ 4.08 — this is what TF class_weight={0:1, 1:4} does
-    pos_weight = args.pos_weight if args.pos_weight else 4.0
+    # ── 2. Compute pos_weight ─────────────────────────────────────────────────
+    # pos_weight=2.0 matches the oversampled ratio (benign:attack ≈ 2:1 after
+    # oversampling to 0.5 ratio). Using the original 80/20 ratio (4.0x)
+    # overcorrects — forces threshold to 0.90+ and hurts accuracy.
+    # 2.0 is the correct value to match TF class_weight on the oversampled data.
+    pos_weight = args.pos_weight if args.pos_weight else 2.0
     print(f"\n  Class weight (pos_weight) : {pos_weight:.3f}x")
 
     # ── 3. Build + train ──────────────────────────────────────────────────────
@@ -802,4 +783,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 
