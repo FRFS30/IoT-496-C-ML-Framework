@@ -588,8 +588,15 @@ def save_scaler_bin(scaler, path: str):
     path   = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     params = scaler.get_params()
-    median = params["median"]
-    iqr    = params["iqr"]
+    # get_params() key names vary across iotids versions — try all known variants
+    median = (params.get("median")
+              or params.get("center_")
+              or params.get("median_")
+              or list(params.values())[0])
+    iqr    = (params.get("iqr")
+              or params.get("scale_")
+              or params.get("iqr_")
+              or list(params.values())[1])
     with open(path, "wb") as f:
         f.write(struct.pack("<I", len(median)))
         f.write(_pack_f32_arr(median))
