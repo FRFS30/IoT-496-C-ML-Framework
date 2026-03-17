@@ -1,1 +1,7 @@
 /processed_reduced
+logs/
+models/
+results/
+**/__pycache__/
+*.pyc
+verify_parallel.py
