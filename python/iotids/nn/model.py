@@ -1,9 +1,5 @@
 import math
-try:
-    import numpy as np
-    _HAS_NP = True
-except ImportError:
-    _HAS_NP = False
+import numpy as np
 
 from .layers import Dense, BatchNormalization, Dropout, Layer
 from .losses import BinaryCrossentropy
@@ -16,11 +12,11 @@ from ..utils import io as _io
 
 class EarlyStopping:
     def __init__(self, patience=5, min_delta=1e-4, restore_best=True):
-        self.patience = patience
-        self.min_delta = min_delta
+        self.patience     = patience
+        self.min_delta    = min_delta
         self.restore_best = restore_best
-        self._best = None
-        self._wait = 0
+        self._best        = None
+        self._wait        = 0
         self.best_weights = None
 
     def __call__(self, val_loss, model):
@@ -29,7 +25,7 @@ class EarlyStopping:
             self._wait = 0
             if self.restore_best:
                 self.best_weights = model.get_weights()
-            return False  # keep going
+            return False
         self._wait += 1
         return self._wait >= self.patience
 
@@ -42,10 +38,10 @@ class LRScheduler:
     """Step decay: lr = lr0 * drop^floor(epoch / every)."""
 
     def __init__(self, optimizer, drop=0.5, every=10):
-        self.opt = optimizer
-        self.drop = drop
+        self.opt   = optimizer
+        self.drop  = drop
         self.every = every
-        self._lr0 = optimizer.lr
+        self._lr0  = optimizer.lr
 
     def step(self, epoch):
         self.opt.lr = self._lr0 * (self.drop ** (epoch // self.every))
@@ -57,25 +53,16 @@ class Sequential:
     def __init__(self, layers):
         self.layers = layers
 
-    # ------------------------------------------------------------------ #
-    # Training mode toggle
-    # ------------------------------------------------------------------ #
     def _set_training(self, flag):
         for l in self.layers:
             l.training = flag
 
-    # ------------------------------------------------------------------ #
-    # Forward pass
-    # ------------------------------------------------------------------ #
     def _forward(self, X):
         out = X
         for l in self.layers:
             out = l.forward(out)
         return out
 
-    # ------------------------------------------------------------------ #
-    # Backward pass
-    # ------------------------------------------------------------------ #
     def _backward(self, grad):
         for l in reversed(self.layers):
             grad = l.backward(grad)
@@ -94,95 +81,58 @@ class Sequential:
             callbacks = []
 
         # Validation split
-        n = len(y)
+        n     = len(y)
         n_val = max(1, int(n * validation_split))
         X_val, y_val = X[-n_val:], y[-n_val:]
         X_tr,  y_tr  = X[:-n_val], y[:-n_val]
         n_tr = len(y_tr)
 
-        # Convert to numpy once — eliminates per-batch list comprehension overhead
-        if _HAS_NP:
-            X_tr_np  = np.array(X_tr,  dtype=np.float64)
-            X_val_np = np.array(X_val, dtype=np.float64)
-        else:
-            X_tr_np  = X_tr
-            X_val_np = X_val
-
-        # Pre-convert index array to numpy for O(1) fancy indexing
-        if _HAS_NP:
-            indices_np = np.arange(n_tr, dtype=np.int64)
+        # Convert once to numpy — O(1) fancy indexing per batch
+        X_tr_np  = np.array(X_tr,  dtype=np.float64)
+        X_val_np = np.array(X_val, dtype=np.float64)
+        idx_np   = np.arange(n_tr, dtype=np.int64)
 
         history = {"loss": [], "val_loss": [], "val_acc": []}
 
         for epoch in range(epochs):
             self._set_training(True)
-
-            # Shuffle
-            if _HAS_NP:
-                np.random.shuffle(indices_np)
-                indices = indices_np
-            else:
-                indices = list(range(n_tr))
-                _fisher_yates(indices)
+            np.random.shuffle(idx_np)
 
             epoch_loss = 0.0
             n_batches  = 0
 
             for start in range(0, n_tr, batch_size):
-                batch_idx = indices[start:start + batch_size]
+                batch_idx = idx_np[start:start + batch_size]
 
-                # O(1) numpy fancy index vs O(batch_size) Python list comprehension
-                if _HAS_NP:
-                    Xb = X_tr_np[batch_idx]
-                    yb = [y_tr[i] for i in batch_idx.tolist()]
-                else:
-                    Xb = [X_tr[i] for i in batch_idx]
-                    yb = [y_tr[i] for i in batch_idx]
+                Xb = X_tr_np[batch_idx]
+                yb = [y_tr[i] for i in batch_idx.tolist()]
 
-                # Forward
-                out = self._forward(Xb)
-                if _HAS_NP:
-                    preds = out[:, -1].tolist()
-                else:
-                    preds = [row[-1] if isinstance(row, list) else row for row in out]
+                out   = self._forward(Xb)
+                preds = out[:, -1].tolist()
 
-                # Loss
-                batch_loss = loss(yb, preds)
+                batch_loss  = loss(yb, preds)
                 epoch_loss += batch_loss
 
-                # Gradient of loss w.r.t. final layer output
                 grad_loss = loss.gradient(yb, preds)
-                # Shape to match final layer output: (batch, 1)
-                if _HAS_NP:
-                    grad = np.array(grad_loss, dtype=np.float64).reshape(-1, 1)
-                else:
-                    grad = [[g] for g in grad_loss]
+                grad      = np.array(grad_loss, dtype=np.float64).reshape(-1, 1)
 
-                # Backward
                 self._backward(grad)
-
-                # Optimiser step
                 optimizer.step(self.layers)
                 n_batches += 1
 
-                # Progress indicator every 50 batches
                 if verbose and n_batches % 50 == 0:
-                    print(f"  epoch {epoch+1} step {n_batches}/{max(1, n_tr // batch_size)}"
+                    print(f"  epoch {epoch+1} step {n_batches}/"
+                          f"{max(1, n_tr // batch_size)}"
                           f" loss={epoch_loss / n_batches:.4f}", flush=True)
 
             epoch_loss /= n_batches
 
-            # Validation in batches — avoids monolithic forward pass on 424K samples
+            # Validation
             self._set_training(False)
             val_preds = []
             for vs in range(0, len(y_val), batch_size):
                 ve = min(vs + batch_size, len(y_val))
-                vb_out = self._forward(X_val_np[vs:ve] if _HAS_NP else X_val[vs:ve])
-                if _HAS_NP:
-                    val_preds += vb_out[:, -1].tolist()
-                else:
-                    val_preds += [row[-1] if isinstance(row, list) else row
-                                  for row in vb_out]
+                val_preds += self._forward(X_val_np[vs:ve])[:, -1].tolist()
 
             val_loss   = loss(y_val, val_preds)
             val_labels = [1 if p >= 0.5 else 0 for p in val_preds]
@@ -194,9 +144,9 @@ class Sequential:
 
             if verbose:
                 print(f"Epoch {epoch+1}/{epochs} | loss={epoch_loss:.4f} "
-                      f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}", flush=True)
+                      f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}",
+                      flush=True)
 
-            # Callbacks (EarlyStopping, LRScheduler)
             stop = False
             for cb in callbacks:
                 if isinstance(cb, EarlyStopping):
@@ -217,21 +167,16 @@ class Sequential:
     # ------------------------------------------------------------------ #
     def predict(self, X):
         self._set_training(False)
-        if _HAS_NP:
-            if not isinstance(X, np.ndarray):
-                X = np.array(X, dtype=np.float64)
-        raw = self._forward(X)
-        if _HAS_NP:
-            return raw[:, -1].tolist()
-        return [row[-1] if isinstance(row, list) else row for row in raw]
+        if not isinstance(X, np.ndarray):
+            X = np.array(X, dtype=np.float64)
+        return self._forward(X)[:, -1].tolist()
 
     def predict_threshold(self, X, t=0.5):
-        probs = self.predict(X)
-        return [1 if p >= t else 0 for p in probs]
+        return [1 if p >= t else 0 for p in self.predict(X)]
 
     def evaluate(self, X, y, threshold=0.5):
-        probs = self.predict(X)
-        labels = [1 if p >= t else 0 for p, t in zip(probs, [threshold] * len(probs))]
+        probs  = self.predict(X)
+        labels = [1 if p >= threshold else 0 for p in probs]
         return {
             "accuracy":  accuracy(y, labels),
             "precision": precision(y, labels),
@@ -241,7 +186,7 @@ class Sequential:
         }
 
     # ------------------------------------------------------------------ #
-    # Weight access — FedAvg aggregation
+    # Weight access — FedAvg
     # ------------------------------------------------------------------ #
     def get_weights(self):
         return [l.get_weights() for l in self.layers]
@@ -252,23 +197,10 @@ class Sequential:
                 l.set_weights(w)
 
     # ------------------------------------------------------------------ #
-    # Save / load — compact binary format via utils/io
+    # Save / load
     # ------------------------------------------------------------------ #
     def save(self, path):
-        state = {"weights": self.get_weights()}
-        _io.save(state, path)
+        _io.save({"weights": self.get_weights()}, path)
 
     def load(self, path):
-        state = _io.load(path)
-        self.set_weights(state["weights"])
-
-
-# ------------------------------------------------------------------ #
-# Helpers
-# ------------------------------------------------------------------ #
-def _fisher_yates(lst):
-    import random
-    n = len(lst)
-    for i in range(n - 1, 0, -1):
-        j = random.randint(0, i)
-        lst[i], lst[j] = lst[j], lst[i]
+        self.set_weights(_io.load(path)["weights"])
