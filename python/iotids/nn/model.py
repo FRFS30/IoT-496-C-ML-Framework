@@ -1,4 +1,10 @@
 import math
+try:
+    import numpy as np
+    _HAS_NP = True
+except ImportError:
+    _HAS_NP = False
+
 from .layers import Dense, BatchNormalization, Dropout, Layer
 from .losses import BinaryCrossentropy
 from .optimizers import Adam
@@ -94,26 +100,51 @@ class Sequential:
         X_tr,  y_tr  = X[:-n_val], y[:-n_val]
         n_tr = len(y_tr)
 
+        # Convert to numpy once — eliminates per-batch list comprehension overhead
+        if _HAS_NP:
+            X_tr_np  = np.array(X_tr,  dtype=np.float64)
+            X_val_np = np.array(X_val, dtype=np.float64)
+        else:
+            X_tr_np  = X_tr
+            X_val_np = X_val
+
+        # Pre-convert index array to numpy for O(1) fancy indexing
+        if _HAS_NP:
+            indices_np = np.arange(n_tr, dtype=np.int64)
+
         history = {"loss": [], "val_loss": [], "val_acc": []}
 
         for epoch in range(epochs):
             self._set_training(True)
 
-            # Shuffle via index only — avoids rebuilding the full 2.4M list
-            indices = list(range(n_tr))
-            _fisher_yates(indices)
+            # Shuffle
+            if _HAS_NP:
+                np.random.shuffle(indices_np)
+                indices = indices_np
+            else:
+                indices = list(range(n_tr))
+                _fisher_yates(indices)
 
             epoch_loss = 0.0
             n_batches  = 0
 
             for start in range(0, n_tr, batch_size):
                 batch_idx = indices[start:start + batch_size]
-                Xb = [X_tr[i] for i in batch_idx]
-                yb = [y_tr[i] for i in batch_idx]
+
+                # O(1) numpy fancy index vs O(batch_size) Python list comprehension
+                if _HAS_NP:
+                    Xb = X_tr_np[batch_idx]
+                    yb = [y_tr[i] for i in batch_idx.tolist()]
+                else:
+                    Xb = [X_tr[i] for i in batch_idx]
+                    yb = [y_tr[i] for i in batch_idx]
 
                 # Forward
                 out = self._forward(Xb)
-                preds = [row[-1] if isinstance(row, list) else row for row in out]
+                if _HAS_NP:
+                    preds = out[:, -1].tolist()
+                else:
+                    preds = [row[-1] if isinstance(row, list) else row for row in out]
 
                 # Loss
                 batch_loss = loss(yb, preds)
@@ -121,8 +152,11 @@ class Sequential:
 
                 # Gradient of loss w.r.t. final layer output
                 grad_loss = loss.gradient(yb, preds)
-                # Shape into list-of-rows matching final layer output
-                grad = [[g] for g in grad_loss]
+                # Shape to match final layer output: (batch, 1)
+                if _HAS_NP:
+                    grad = np.array(grad_loss, dtype=np.float64).reshape(-1, 1)
+                else:
+                    grad = [[g] for g in grad_loss]
 
                 # Backward
                 self._backward(grad)
@@ -143,9 +177,12 @@ class Sequential:
             val_preds = []
             for vs in range(0, len(y_val), batch_size):
                 ve = min(vs + batch_size, len(y_val))
-                vb_out = self._forward(X_val[vs:ve])
-                val_preds += [row[-1] if isinstance(row, list) else row
-                              for row in vb_out]
+                vb_out = self._forward(X_val_np[vs:ve] if _HAS_NP else X_val[vs:ve])
+                if _HAS_NP:
+                    val_preds += vb_out[:, -1].tolist()
+                else:
+                    val_preds += [row[-1] if isinstance(row, list) else row
+                                  for row in vb_out]
 
             val_loss   = loss(y_val, val_preds)
             val_labels = [1 if p >= 0.5 else 0 for p in val_preds]
@@ -180,7 +217,12 @@ class Sequential:
     # ------------------------------------------------------------------ #
     def predict(self, X):
         self._set_training(False)
+        if _HAS_NP:
+            if not isinstance(X, np.ndarray):
+                X = np.array(X, dtype=np.float64)
         raw = self._forward(X)
+        if _HAS_NP:
+            return raw[:, -1].tolist()
         return [row[-1] if isinstance(row, list) else row for row in raw]
 
     def predict_threshold(self, X, t=0.5):
