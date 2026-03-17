@@ -5,37 +5,37 @@ Compact binary serializer for XGBoostClassifier and GradientBooster models.
 
 Design goals
 ------------
-* float64 -> float32 downcast on save — leaf values and thresholds are stored
+* float64 -> float32 downcast on save -- leaf values and thresholds are stored
   as 4-byte floats, matching forest/serializer.py and avoiding the silent
   float64 bloat of pickle.
-* Checksum validation on load — detects truncated files from interrupted
+* Checksum validation on load -- detects truncated files from interrupted
   training saves (common on shared university servers with quota limits).
 * Unified binary layout compatible with forest/serializer.py so a single
   model store can hold Random Forest, XGBoost, and DNN checkpoints.
-* Zero third-party dependencies — uses only Python stdlib (struct, json, zlib).
+* Zero third-party dependencies -- uses only Python stdlib (struct, json, zlib).
 
 File format
 -----------
 All values are big-endian (network byte order) for portability.
 
     HEADER (32 bytes)
-    ─────────────────
+    -----------------
     magic       : 8 bytes  = b"IOTIDSXG"
     version     : 2 bytes  = uint16 (current: 1)
     model_type  : 2 bytes  = uint16 (1=GradientBooster, 2=XGBoostClassifier)
-    json_len    : 4 bytes  = uint32 — byte length of JSON metadata block
-    data_len    : 4 bytes  = uint32 — byte length of binary leaf-value block
+    json_len    : 4 bytes  = uint32 -- byte length of JSON metadata block
+    data_len    : 4 bytes  = uint32 -- byte length of binary leaf-value block
     reserved    : 8 bytes  = 0x00 padding
     crc32       : 4 bytes  = zlib.crc32 of everything AFTER the header
 
     JSON METADATA (json_len bytes)
-    ──────────────────────────────
+    ------------------------------
     UTF-8 JSON blob containing all hyperparameters and tree structure
     (feature indices, thresholds, node counts).  Leaf values are stored
     in the binary block instead of JSON to allow fast float32 I/O.
 
     BINARY LEAF BLOCK (data_len bytes)
-    ────────────────────────────────────
+    ------------------------------------
     Flat sequence of float32 values (big-endian) storing all leaf values
     from all trees in node-index order.  A per-tree leaf count table in
     the JSON metadata maps ranges of this flat array back to individual trees.
@@ -73,7 +73,8 @@ from .xgboost_classifier import XGBoostClassifier
 # ---------------------------------------------------------------------------
 
 _MAGIC           = b"IOTIDSXG"
-_VERSION         = 1
+_VERSION         = 2          # v2: JSON metadata block is zlib-compressed
+_VERSION_LEGACY  = 1          # v1 files (uncompressed JSON) still loadable
 _MODEL_BOOSTER   = 1
 _MODEL_XGB       = 2
 
@@ -113,8 +114,8 @@ def _extract_leaves(booster: GradientBooster) -> tuple[dict, bytes]:
 
     Returns
     -------
-    meta  : dict  – JSON-serializable dict (no leaf values)
-    data  : bytes – flat float32 binary blob of all leaf values
+    meta  : dict  - JSON-serializable dict (no leaf values)
+    data  : bytes - flat float32 binary blob of all leaf values
     """
     # Build a JSON-safe meta dict from booster.to_dict(), but strip leaf values
     full_dict = booster.to_dict()
@@ -219,14 +220,16 @@ def save_booster(model: GradientBooster, path: str) -> None:
 
     Parameters
     ----------
-    model : GradientBooster – must be fit
-    path  : str             – destination file path
+    model : GradientBooster - must be fit
+    path  : str             - destination file path
     """
     if not model._is_fit:
         raise RuntimeError("Cannot save an unfit GradientBooster")
 
     meta, data_bytes = _extract_leaves(model)
-    json_bytes = json.dumps(meta, separators=(",", ":")).encode("utf-8")
+    json_bytes = zlib.compress(
+        json.dumps(meta, separators=(",", ":")).encode("utf-8"), level=6
+    )
 
     payload = json_bytes + data_bytes
     crc = zlib.crc32(payload) & 0xFFFFFFFF
@@ -246,8 +249,8 @@ def save_xgb(model: XGBoostClassifier, path: str) -> None:
 
     Parameters
     ----------
-    model : XGBoostClassifier – must be fit
-    path  : str               – destination file path
+    model : XGBoostClassifier - must be fit
+    path  : str               - destination file path
     """
     if not model._is_fit or model._booster is None:
         raise RuntimeError("Cannot save an unfit XGBoostClassifier")
@@ -261,7 +264,9 @@ def save_xgb(model: XGBoostClassifier, path: str) -> None:
         "best_n_trees":       model._best_n_trees,
     }
 
-    json_bytes = json.dumps(meta, separators=(",", ":")).encode("utf-8")
+    json_bytes = zlib.compress(
+        json.dumps(meta, separators=(",", ":")).encode("utf-8"), level=6
+    )
 
     payload = json_bytes + data_bytes
     crc = zlib.crc32(payload) & 0xFFFFFFFF
@@ -308,7 +313,11 @@ def load_booster(path: str) -> GradientBooster:
             "File may be truncated or corrupted."
         )
 
-    meta = json.loads(json_bytes.decode("utf-8"))
+    # v2: JSON block is zlib-compressed; v1: raw UTF-8
+    try:
+        meta = json.loads(zlib.decompress(json_bytes).decode("utf-8"))
+    except Exception:
+        meta = json.loads(json_bytes.decode("utf-8"))
 
     # Strip internal keys before rebuilding
     meta.pop("_xgb_wrapper", None)
@@ -345,7 +354,10 @@ def load_xgb(path: str) -> XGBoostClassifier:
             "File may be truncated or corrupted."
         )
 
-    meta = json.loads(json_bytes.decode("utf-8"))
+    try:
+        meta = json.loads(zlib.decompress(json_bytes).decode("utf-8"))
+    except Exception:
+        meta = json.loads(json_bytes.decode("utf-8"))
 
     xgb_wrapper = meta.pop("_xgb_wrapper", {})
     leaf_counts  = meta.pop("_leaf_counts", [])
@@ -371,11 +383,11 @@ def load_weights(path: str) -> List[List[float]]:
     Load only the leaf values from a saved model.
 
     Significantly faster than load_xgb() when you only need to inspect or
-    broadcast weights for federated averaging — no tree structure is rebuilt.
+    broadcast weights for federated averaging -- no tree structure is rebuilt.
 
     Returns
     -------
-    List[List[float]] — one leaf list per tree, same structure as
+    List[List[float]] -- one leaf list per tree, same structure as
     XGBoostClassifier.get_weights()
     """
     with open(path, "rb") as f:
@@ -393,7 +405,10 @@ def load_weights(path: str) -> List[List[float]]:
             f"CRC32 mismatch: stored={stored_crc:#010x}, computed={actual_crc:#010x}."
         )
 
-    meta         = json.loads(json_bytes.decode("utf-8"))
+    try:
+        meta = json.loads(zlib.decompress(json_bytes).decode("utf-8"))
+    except Exception:
+        meta = json.loads(json_bytes.decode("utf-8"))
     leaf_counts  = meta.get("_leaf_counts", [])
 
     result: List[List[float]] = []
@@ -426,7 +441,10 @@ def model_info(path: str) -> dict:
 
     payload_start = _HEADER_SIZE
     json_bytes    = raw[payload_start: payload_start + json_len]
-    meta          = json.loads(json_bytes.decode("utf-8"))
+    try:
+        meta = json.loads(zlib.decompress(json_bytes).decode("utf-8"))
+    except Exception:
+        meta = json.loads(json_bytes.decode("utf-8"))
 
     leaf_counts    = meta.get("_leaf_counts", [])
     model_type_str = {_MODEL_BOOSTER: "GradientBooster",
