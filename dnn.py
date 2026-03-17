@@ -602,9 +602,10 @@ def save_threshold_bin(threshold: float, path: str):
 def find_threshold(model: Sequential, X_val: list, y_val: list,
                    config: Config) -> float:
     """
-    threshold_sweep returns a list of dicts, each with keys:
-      "threshold", "accuracy", "precision", "recall", "f1"
-    e.g. [{"threshold": 0.10, "f1": 0.85, ...}, ...]
+    threshold_sweep(y_true, y_scores, thresholds) returns:
+        list of (threshold, f1, precision, recall) 4-tuples
+
+    Index layout: r[0]=threshold, r[1]=f1, r[2]=precision, r[3]=recall
     """
     if not config.OPTIMIZE_THRESHOLD:
         return config.DECISION_THRESHOLD
@@ -614,13 +615,14 @@ def find_threshold(model: Sequential, X_val: list, y_val: list,
     results  = threshold_sweep(y_val, y_scores,
                                thresholds=[i / 100 for i in range(10, 91)])
 
-    best   = max(results, key=lambda r: r["f1"])
-    best_t = best["threshold"]
+    # results is list of (threshold, f1, precision, recall) 4-tuples
+    best = max(results, key=lambda r: r[1])
+    best_t, best_f1, best_p, best_r = best[0], best[1], best[2], best[3]
 
     print(f"  Optimal threshold : {best_t:.2f}  "
-          f"(F1={best['f1']:.4f}  "
-          f"P={best['precision']:.4f}  "
-          f"R={best['recall']:.4f})")
+          f"(F1={best_f1:.4f}  "
+          f"P={best_p:.4f}  "
+          f"R={best_r:.4f})")
     return float(best_t)
 
 
@@ -631,8 +633,8 @@ def find_threshold(model: Sequential, X_val: list, y_val: list,
 def evaluate(model: Sequential, X: list, y: list,
              threshold: float, label: str) -> dict:
     """
-    confusion_matrix returns a numpy 2D array.
-    tn, fp, fn, tp = cm.ravel()  unpacks it correctly.
+    confusion_matrix(y_true, y_pred) returns (cm_2d_list, labels).
+    For binary classification: cm[0][0]=TN, cm[0][1]=FP, cm[1][0]=FN, cm[1][1]=TP
     """
     print(f"\n  [{label}]")
     y_scores = model.predict(X)
@@ -643,9 +645,13 @@ def evaluate(model: Sequential, X: list, y: list,
     rec  = recall(y, y_pred)
     f1   = f1_score(y, y_pred)
     auc  = roc_auc(y, y_scores)
-    cm   = confusion_matrix(y, y_pred)
-    tn, fp, fn, tp = cm.ravel()
-    tn = int(tn); fp = int(fp); fn = int(fn); tp = int(tp)
+
+    # confusion_matrix returns (2d_list, labels) — unpack accordingly
+    cm, _ = confusion_matrix(y, y_pred)
+    tn = int(cm[0][0])
+    fp = int(cm[0][1])
+    fn = int(cm[1][0])
+    tp = int(cm[1][1])
 
     fpr = fp / max(fp + tn, 1)
     fnr = fn / max(fn + tp, 1)
@@ -783,4 +789,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
