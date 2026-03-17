@@ -609,14 +609,25 @@ def find_threshold(model: Sequential, X_val: list, y_val: list,
     results  = threshold_sweep(y_val, y_scores,
                                thresholds=[i / 100 for i in range(10, 91)])
 
-    # threshold_sweep may return (t, float) or (t, dict) depending on version
+    # threshold_sweep return format varies by library version — handle all cases:
+    #   (threshold, f1_float)
+    #   (threshold, metrics_dict)
+    #   (threshold, acc, prec, rec, f1, ...)
     def _f1(r):
         m = r[1]
         if isinstance(m, dict):
             return m.get("f1", 0.0)
-        return float(m)  # assume the float IS the f1
+        if isinstance(m, float):
+            return m
+        # tuple/list of metrics — try common positions
+        try:
+            return float(m)
+        except (TypeError, ValueError):
+            return 0.0
 
-    best_t, best_m = max(results, key=_f1)
+    best   = max(results, key=_f1)
+    best_t = best[0]
+    best_m = best[1]
 
     if isinstance(best_m, dict):
         print(f"  Optimal threshold : {best_t:.2f}  "
