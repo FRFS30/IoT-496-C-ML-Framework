@@ -63,8 +63,8 @@ class Config:
     REPEATS        = 1          # number of independent sample+train+eval runs
 
     # Model hyperparameters
-    N_ESTIMATORS       = 100
-    MAX_DEPTH          = 20
+    N_ESTIMATORS       = 20
+    MAX_DEPTH          = 12
     MIN_SAMPLES_SPLIT  = 50
     MIN_SAMPLES_LEAF   = 20
     MAX_FEATURES       = "sqrt"
