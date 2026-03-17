@@ -1,0 +1,81 @@
+nohup: ignoring input
+
+================================================================================
+                 DEEP NEURAL NETWORK BASELINE  —  iotids Library                
+                   No TensorFlow · No scikit-learn · No pandas                  
+================================================================================
+
+  Backend : pure-python
+
+================================================================================
+LOADING CIC-IDS-2017 DATASET
+================================================================================
+
+  Loading: processed_reduced/clean_dataset.csv
+  Loaded 2,830,743 rows, 25 columns
+  Class distribution:
+    0.0                                       2,273,097  (80.30%)
+    1.0                                         557,646  (19.70%)
+
+================================================================================
+DATA PREPROCESSING
+================================================================================
+  Feature columns: 24
+  Converting to float arrays...
+  Replacing Inf values...
+  Dropping NaN rows...
+  Clipping outliers [1st, 99th pct]...
+
+  After cleaning:
+    Samples  : 2,830,743
+    Features : 24
+    Benign   : 2,273,097  (80.3%)
+    Attack   : 557,646  (19.7%)
+
+================================================================================
+DATA SPLITTING AND SCALING
+================================================================================
+  Train : 1,981,522  (70.0%)
+  Val   : 424,611  (15.0%)
+  Test  : 424,610  (15.0%)
+  Fitting RobustScaler on training data...
+  Scaling complete.
+  Oversampled: 390,353 → 795,584 attacks  (total train: 2,386,753)
+
+================================================================================
+MODEL ARCHITECTURE  (iotids.nn)
+================================================================================
+
+  Loss     : FocalLoss(alpha=0.7, gamma=1.8)
+  Optimizer: Adam(lr=0.0002)
+  Arch     : 24 -> 256 -> 128 -> 64 -> 1
+  Dropout  : [0.4, 0.4, 0.3]
+  Batch    : 4096  (maximised for throughput)
+
+================================================================================
+TRAINING
+================================================================================
+
+  Class weight — attack: 2.00x
+  Training samples     : 2,386,753
+  Validation samples   : 424,611
+  Batch size           : 4096
+  Steps/epoch          : 582
+  Max epochs           : 40
+  Early stop patience  : 7
+
+Traceback (most recent call last):
+  File "/scratch/yjh5327/IoT-496-C-ML-Framework/dnn.py", line 696, in <module>
+    main()
+  File "/scratch/yjh5327/IoT-496-C-ML-Framework/dnn.py", line 649, in main
+    history, t_train  = train(model, splits, config)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/yjh5327/IoT-496-C-ML-Framework/dnn.py", line 431, in train
+    history = model.fit(
+              ^^^^^^^^^^
+  File "/scratch/yjh5327/IoT-496-C-ML-Framework/python/iotids/nn/model.py", line 165, in fit
+    optimizer.step(self.layers)
+  File "/scratch/yjh5327/IoT-496-C-ML-Framework/python/iotids/nn/optimizers.py", line 85, in step
+    m[i] = self.beta1 * m[i] + (1.0 - self.beta1) * g_i
+                               ~~~~~~~~~~~~~~~~~~~^~~~~
+TypeError: can't multiply sequence by non-int of type 'float'
