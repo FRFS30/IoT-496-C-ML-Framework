@@ -129,7 +129,7 @@ class Config:
     VAL_SIZE     = 0.15
 
     # Training
-    EPOCHS        = 80
+    EPOCHS        = 40
     BATCH_SIZE    = 4096
     LEARNING_RATE = 1e-3          # higher initial LR — scheduler will decay it
     PATIENCE      = 15            # was 10 — gives more room to escape plateaus
@@ -654,7 +654,11 @@ def evaluate(model: Sequential, X: list, y: list,
     For binary classification: cm[0][0]=TN, cm[0][1]=FP, cm[1][0]=FN, cm[1][1]=TP
     """
     print(f"\n  [{label}]")
-    y_scores = model.predict(X)
+    # Batched inference — prevents freeze on large splits (>500K samples)
+    INFER_BATCH = 8192
+    y_scores = []
+    for _i in range(0, len(X), INFER_BATCH):
+        y_scores.extend(model.predict(X[_i:_i + INFER_BATCH]))
     y_pred   = [1 if s >= threshold else 0 for s in y_scores]
 
     acc  = accuracy(y, y_pred)
