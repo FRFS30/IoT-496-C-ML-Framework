@@ -1,22 +1,27 @@
 #include <stdio.h>
 #include <string.h>
+#include <math.h> 
 //#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "lwip/tcp.h"
-#include "rf_model.h"  
+#include "xgb_model.h"  
 
 /*
-This is a random forest model runtime in C for a Raspberry Pi Pico 2 W.  Samples are streamed through a TCP server to the Pico received using a ring buffer that the model reads from.
+This is a random forest model runtime in C for a Raspberry Pi Pico 2 W.  Samples are streamed through a TCP server to the Pico using a ring buffer that the model reads from.
 The server sending the samples is a Raspbery PI 5 assumed to be on the same local network as the microcontroller
 */
 #define SERVER_IP "10.0.0.224"  //The raspberry PI 5's local IP and port, may change often between runs if the server hasn't turned off DHCP
 #define SERVER_PORT 5005
 
-#define BUFFER_SIZE (97 * 4000) //buffer should align to 97 bytes for slight performance gain, also clearly shows that the buffer can hold 4000 samples (~379 KiB)
+#define BUFFER_SIZE (97 * 2000) //buffer should align to 97 bytes for slight performance gain, also clearly shows that the buffer can hold 2000 samples 
 #define FEATURES 24 
 #define SAMPLE_SIZE (FEATURES * sizeof(float) + 1) //97 bytes
 #define NUM_SAMPLES 2273097
+
+#define LEARNING_RATE 0.1f  
+#define OPTIMAL_THRESHOLD 0.5f  
+#define BASE_SCORE 0.0f 
 
 //Keep in mind that modifying sample.label with it's name probably doesn't work (not that there is reason to)
 typedef struct __attribute__((packed)) { //Make a typedef for convience of making samples on the fly, packed so we don't care about word alignment and get ONLY 97 bytes per sample (not 100).  Doing it like this does force specific byte manipulation which is what memcpy in buffer_read_block does
@@ -57,7 +62,7 @@ static bool buffer_push(uint8_t byte){ //Writes a received byte to the buffer, r
 }
 */
 
-static bool buffer_push_block(const uint8_t* data, uint32_t len) { //Writes len bytes to the buffer, more performant than previous implementation as we know the number of bytes in a TCP packet, returns if write was successful
+static bool buffer_push_block(const uint8_t* data, uint32_t len) { //Writes len bytes to the buffer, more performant than previous implementation as we know the number of byes in a TCP packet, returns if write was successful
     uint32_t free_space; //32 bit memory addresses
     if (write_pos >= read_pos)
         free_space = BUFFER_SIZE - (write_pos - read_pos) - 1; //Opposite of buffer_available
@@ -111,39 +116,38 @@ static bool buffer_read_block(uint8_t* dest,uint32_t len) { //Same memcpy optimi
 }
 
 
-
-
-int predict_tree(Node* node, float* X) {  //Gets the predicted attack or benign for a specific tree in the random forest
+float predict_tree(Node* node, const float* X) {  //Returns the leaf value for a specific tree
     int idx = 0;
-    while (node[idx].feature != -1) { //If the feature is -1 (not 0-24) then it is a leaf node and we have the tree's prediction
+    while (node[idx].feature != -1) {
         if (X[node[idx].feature] <= node[idx].threshold)
             idx = node[idx].left;
         else
             idx = node[idx].right;
 
-        if (idx == -1) break;  // safety check
+        if (idx == -1) break;  //Safety check
     }
-    return node[idx].value;
+    return node[idx].value;  //return the leaf value
 }
 
-int classify_sample(const float* X_raw) {//function to classify a single sample
-    float X_scaled[FEATURES];
+// Function to apply sigmoid to the raw score
+float sigmoid(float x) {
+    return 1.0f / (1.0f + exp(-x));  // exp() is used to compute e^(-x)
+}
 
-    for (int i = 0; i < FEATURES; i++) { //Use scalar to scale input
-        if (iqr[i] != 0.0f)
-            X_scaled[i] = (X_raw[i] - medians[i]) * inv_iqr[i];
-        else
-            X_scaled[i] = 0.0f;
+int classify_sample(const float* X_raw) { //function to classify a single sample
+    // Don't have to bother with scaling this time
+    float total_score = BASE_SCORE;  // Start with the base score (log-odds)
+
+    //Summing the predictions from all trees
+    for (int t = 0; t < N_TREES; t++) {
+        total_score += predict_tree(forest[t], X_raw) * LEARNING_RATE;
     }
 
-    //predict
-    int votes = 0;
-    for (int t = 0; t < N_TREES; t++)
-        votes += predict_tree(forest[t], X_scaled);
-
-    //use all the trees to do a majority vote
-    return votes > N_TREES / 2 ? 1 : 0;
+    float prob = sigmoid(total_score); // Apply sigmoid to get the probability of class 1
+    return prob >= OPTIMAL_THRESHOLD ? 1 : 0; // Classify based on the probability (default threshold 0.5)
 }
+
+
 
 void process_samples(int* correct, int* total){ //Where the magic happens lwk
     //int* results = malloc(2 * sizeof(int)); //so we can keep track of correct and total samples after the function closes
@@ -208,7 +212,6 @@ static err_t tcp_connected(void* arg, struct tcp_pcb* tpcb, err_t err){ //Just c
     return ERR_OK;
 }
 
-
 void tcp_client_connect(){ //Connect to the TCP server on our PI 5
     ip_addr_t ip; // Struct defined in "lwip/tcp.h", 32 bytes define an IP address as 4 8 bit ints (ex. 192.168.1.100 -> 0xC0A80164)
     ipaddr_aton(SERVER_IP,&ip); //Convert the IP to a binary ip_addr_t and store it in ip
@@ -225,7 +228,7 @@ int main(){
     cyw43_arch_enable_sta_mode();
     while (true) {
         printf("Connecting to Wi-Fi...\n");
-        int result = cyw43_arch_wifi_connect_timeout_ms("BP205","passwd",CYW43_AUTH_WPA2_AES_PSK,30000);
+        int result = cyw43_arch_wifi_connect_timeout_ms("BP205","BeaverPlaza205!",CYW43_AUTH_WPA2_AES_PSK,30000);
         if (result == 0) {
             printf("Connected.\n");
             break;
