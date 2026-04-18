@@ -32,7 +32,7 @@ typedef struct __attribute__((packed)) { //Make a typedef for convience of makin
 
 static uint8_t ring_buffer[BUFFER_SIZE];
 
-static volatile uint32_t write_pos = 0; //Volatile prevents compiler optimizations from messing with these constantly changing values
+static volatile uint32_t write_pos = 0; //Volatile prevents compiler optimizations from messing with these constantly changing values, may not actually be necessary
 static volatile uint32_t read_pos  = 0;
 static volatile bool connection_closed = false;
 
@@ -144,7 +144,7 @@ int classify_sample(const float* X_raw) { //function to classify a single sample
     }
 
     float prob = sigmoid(total_score); // Apply sigmoid to get the probability of class 1
-    return prob >= OPTIMAL_THRESHOLD ? 1 : 0; // Classify based on the probability (default threshold 0.5)
+    return prob >= OPTIMAL_THRESHOLD ? 1 : 0; // Classify based on the probability (threshold 0.5 currently, may experiment with changes)
 }
 
 
@@ -185,7 +185,7 @@ static err_t tcp_recv_cb(void* arg, struct tcp_pcb* tpcb, struct pbuf* p ,err_t 
 
     struct pbuf* q = p; //Make a local pbuf address copy just to be safe
     while (q){
-        uint8_t* payload = (uint8_t*)q->payload;
+        uint8_t* payload = (uint8_t*)q->payload; //Cast the void payload pointer to uint8_t so we can manipulate it byte by byte (you may be able to skip this step if you only use memcpy)
         while (!buffer_push_block(payload, q->len)) {/*q->len is NOT neccecarily 97 bytes for a sample it could be bassically anything (probably 1496 bytes based on debug data),
             we are just writing blocks of data here and it is process_samples()'s job to read 97 byte blocks alinged to make a sample*/
             process_samples(&correct, &total); //buffer full so we should process samples to free space 
@@ -203,10 +203,10 @@ static err_t tcp_connected(void* arg, struct tcp_pcb* tpcb, err_t err){ //Just c
     tcp_recv(tpcb,tcp_recv_cb);
     /* For refrence, packet buffer this is the struct that actually is received as data from 
     struct pbuf {
-        struct pbuf *next;
-        void *payload;
-        u16_t len;
-        u16_t tot_len;
+        struct pbuf *next; //The next packet in the chain
+        void *payload; //Base pointer to the data
+        u16_t len; //Length of the data from the base pointer
+        u16_t tot_len; //Total length of the TCP chain (I don't use this)
     };
     */
     return ERR_OK;
