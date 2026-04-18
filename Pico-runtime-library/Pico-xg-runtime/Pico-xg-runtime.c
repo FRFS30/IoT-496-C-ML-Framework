@@ -8,7 +8,7 @@
 #include "xgb_model.h"  
 
 /*
-This is a random forest model runtime in C for a Raspberry Pi Pico 2 W.  Samples are streamed through a TCP server to the Pico using a ring buffer that the model reads from.
+This is a XGBoost model runtime in C for a Raspberry Pi Pico 2 W.  Samples are streamed through a TCP server to the Pico using a ring buffer that the model reads from.
 The server sending the samples is a Raspbery PI 5 assumed to be on the same local network as the microcontroller
 */
 #define SERVER_IP "10.0.0.224"  //The raspberry PI 5's local IP and port, may change often between runs if the server hasn't turned off DHCP
@@ -97,9 +97,9 @@ static bool buffer_pop(uint8_t* byte){ //Reads a byte from the buffer at the giv
 }
 */
 
-static bool buffer_read_block(uint8_t* dest,uint32_t len) { //Same memcpy optimization as before, much faster than looping through each byte, returns whether was successful
+static int buffer_read_block(uint8_t* dest,uint32_t len) { //Same memcpy optimization as before, much faster than looping through each byte, returns whether was successful
     if (buffer_available() < len)
-        return false;
+        return -1;
     uint32_t first_part = BUFFER_SIZE - read_pos;
     if (first_part > len)
         first_part = len;
@@ -112,7 +112,7 @@ static bool buffer_read_block(uint8_t* dest,uint32_t len) { //Same memcpy optimi
         memcpy(dest + first_part, &ring_buffer[read_pos], remaining);
         read_pos += (read_pos + remaining) % BUFFER_SIZE;
     }
-    return true;
+    return 0;
 }
 
 
@@ -153,7 +153,7 @@ void process_samples(int* correct, int* total){ //Where the magic happens lwk
     //int* results = malloc(2 * sizeof(int)); //so we can keep track of correct and total samples after the function closes
     while (buffer_available() >= SAMPLE_SIZE){ //Only begin reading a sample if a full sample has been written. Technically could be optimized to start while a sample is still being written but that would likely cause major issues not easily addressable
         sample_t sample;
-        buffer_read_block((uint8_t*)&sample,SAMPLE_SIZE); //Reads 97 bytes from the buffer and puts them in the sample struct
+        buffer_read_block((uint8_t*)&sample,SAMPLE_SIZE); //Reads 97 bytes from the buffer and puts them in the sample struct (using memcpy)
         //From here we are doing normal not direct byte and address manipulation coding on the sample so the packed struct becomes kinda unusable
         //So I copy 96 bytes of the sample (everything but the label) into a float alinged array for the model to then use
         float aligned_features[FEATURES]; 
