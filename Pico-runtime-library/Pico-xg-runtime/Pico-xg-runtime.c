@@ -228,7 +228,7 @@ int main(){
     cyw43_arch_enable_sta_mode();
     while (true) {
         printf("Connecting to Wi-Fi...\n");
-        int result = cyw43_arch_wifi_connect_timeout_ms("BP205","BeaverPlaza205!",CYW43_AUTH_WPA2_AES_PSK,30000);
+        int result = cyw43_arch_wifi_connect_timeout_ms("BP205","passwd",CYW43_AUTH_WPA2_AES_PSK,30000);
         if (result == 0) {
             printf("Connected.\n");
             break;
